@@ -175,7 +175,7 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
         # running inside Docker
         driver_exe_path = "/app/chromedriver"
     else:
-        version_main = get_chrome_major_version()
+        version_main = int(get_chrome_major_version())
         if PATCHED_DRIVER_PATH is not None:
             driver_exe_path = PATCHED_DRIVER_PATH
 
