@@ -17,6 +17,7 @@ dependencies = [
     "requests==2.32.0",
     "certifi==2024.07.04",
     "websockets==11.0.3",
+    "WebTest==3.0.0",
     "xvfbwrapper==0.2.9; platform_system != \"Windows\"",
     "pefile==2023.2.7; platform_system == \"Windows\"",
     "setuptools>=71.1.0",
@@ -37,6 +38,11 @@ classifiers = [
 requires-python = ">=3.9"
 readme = "README.md"
 license = {text = "MIT"}
+
+[tool.pdm.dev-dependencies]
+test = [
+    "WebTest==3.0.0",
+]
 
 [project.urls]
 homepage = "https://github.com/FlareSolverr/FlareSolverr/"
