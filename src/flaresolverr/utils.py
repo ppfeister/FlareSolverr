@@ -188,7 +188,11 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
         driver = uc.Chrome(options=options, browser_executable_path=browser_executable_path,
                            driver_executable_path=driver_exe_path, version_main=version_main,
                            windows_headless=windows_headless, headless=get_config_headless())
+    except TypeError as e:
+        logging.error("Invalid arguments were passed to Chrome: %s" % e)
+        return None
     except Exception as e:
+        # TODO: Generic exception handling not ideal
         logging.error("Error starting Chrome: %s" % e)
 
     # save the patched driver to avoid re-downloads
