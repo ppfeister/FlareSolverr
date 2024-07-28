@@ -10,7 +10,9 @@ import sys
 from selenium.webdriver.chrome.webdriver import WebDriver
 import undetected_chromedriver as uc
 
-FLARESOLVERR_VERSION = None
+from flaresolverr import __version__
+
+FLARESOLVERR_VERSION = __version__
 PLATFORM_VERSION = None
 CHROME_EXE_PATH = None
 CHROME_MAJOR_VERSION = None
@@ -28,16 +30,7 @@ def get_config_headless() -> bool:
 
 
 def get_flaresolverr_version() -> str:
-    global FLARESOLVERR_VERSION
-    if FLARESOLVERR_VERSION is not None:
-        return FLARESOLVERR_VERSION
-
-    package_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'package.json')
-    if not os.path.isfile(package_path):
-        package_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'package.json')
-    with open(package_path) as f:
-        FLARESOLVERR_VERSION = json.loads(f.read())['version']
-        return FLARESOLVERR_VERSION
+    return FLARESOLVERR_VERSION
 
 def get_current_platform() -> str:
     global PLATFORM_VERSION
