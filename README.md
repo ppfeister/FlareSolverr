@@ -65,32 +65,24 @@ Remember to restart the Docker daemon and the container after the update.
 
 ### Precompiled binaries
 
-> **Warning**
+> [!WARNING]
 > Precompiled binaries are only available for x64 architecture. For other architectures see Docker images.
 
 This is the recommended way for Windows users.
 * Download the [FlareSolverr executable](https://github.com/FlareSolverr/FlareSolverr/releases) from the release's page. It is available for Windows x64 and Linux x64.
 * Execute FlareSolverr binary. In the environment variables section you can find how to change the configuration.
 
-### From source code
+### Install via PyPI (pip/pipx)
 
-> **Warning**
-> Installing from source code only works for x64 architecture. For other architectures see Docker images.
+> [!WARNING]
+> Installing from PyPI has not been validated on all architectures. Only x64 is properly supported.
 
-* Install [Python 3.11](https://www.python.org/downloads/).
-* Install [Chrome](https://www.google.com/intl/en_us/chrome/) (all OS) or [Chromium](https://www.chromium.org/getting-involved/download-chromium/) (just Linux, it doesn't work in Windows) web browser.
-* (Only in Linux) Install [Xvfb](https://en.wikipedia.org/wiki/Xvfb) package.
-* (Only in macOS) Install [XQuartz](https://www.xquartz.org/) package.
-* Clone this repository and open a shell in that path.
-* Run `pip install -r requirements.txt` command to install FlareSolverr dependencies.
-* Run `python src/flaresolverr.py` command to start FlareSolverr.
+`pipx` is recommended for more predicable behavior, but it can be substituted with `pip` if you prefer.
 
-### From source code (FreeBSD/TrueNAS CORE)
-
-* Run `pkg install chromium python39 py39-pip xorg-vfbserver` command to install the required dependencies.
-* Clone this repository and open a shell in that path.
-* Run `python3.9 -m pip install -r requirements.txt` command to install FlareSolverr dependencies.
-* Run `python3.9 src/flaresolverr.py` command to start FlareSolverr.
+```bash
+pipx install flaresolverr
+python -m flaresolverr
+```
 
 ### Systemd service
 
