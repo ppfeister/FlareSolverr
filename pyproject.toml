@@ -1,8 +1,11 @@
 [project]
 name = "FlareSolverr"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Proxy server to bypass Cloudflare protection"
 authors = [
+    {name = "Diego Heras", email = "ngosang@hotmail.es"},
+]
+maintainers = [
     {name = "Paul Pfeister", email = "code@pfeister.dev"},
 ]
 dependencies = [
@@ -18,9 +21,26 @@ dependencies = [
     "pefile==2023.2.7; platform_system == \"Windows\"",
     "setuptools>=71.1.0",
 ]
+keywords = ["proxy", "cloudflare", "ddos-guard", "captcha", "security"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers, Security",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 requires-python = ">=3.9"
 readme = "README.md"
 license = {text = "MIT"}
+
+[project.urls]
+homepage = "https://github.com/FlareSolverr/FlareSolverr/"
+bug-tracker = "https://github.com/FlareSolverr/FlareSolverr/issues/"
+documentation = "https://github.com/FlareSolverr/FlareSolverr/wiki/"
 
 [build-system]
 requires = ["pdm-backend"]
@@ -29,3 +49,6 @@ build-backend = "pdm.backend"
 
 [tool.pdm]
 distribution = true
+
+[tool.pdm.version]
+source = "scm"
