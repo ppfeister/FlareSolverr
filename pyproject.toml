@@ -20,6 +20,7 @@ dependencies = [
     "xvfbwrapper==0.2.9; platform_system != \"Windows\"",
     "pefile==2023.2.7; platform_system == \"Windows\"",
     "setuptools>=71.1.0",
+    "undetected-chromedriver>=3.5.5",
 ]
 keywords = ["proxy", "cloudflare", "ddos-guard", "captcha", "security"]
 classifiers = [
