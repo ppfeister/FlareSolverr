@@ -6,12 +6,12 @@ import sys
 import certifi
 from bottle import run, response, Bottle, request, ServerAdapter
 
-from bottle_plugins.error_plugin import error_plugin
-from bottle_plugins.logger_plugin import logger_plugin
-from bottle_plugins import prometheus_plugin
-from dtos import V1RequestBase
-import flaresolverr_service
-import utils
+from flaresolverr.bottle_plugins.error_plugin import error_plugin
+from flaresolverr.bottle_plugins.logger_plugin import logger_plugin
+from flaresolverr.bottle_plugins import prometheus_plugin
+from flaresolverr.dtos import V1RequestBase
+import flaresolverr.flaresolverr_service as flaresolverr_service
+import flaresolverr.utils as utils
 
 
 class JSONErrorBottle(Bottle):
