@@ -19,8 +19,6 @@ dependencies = [
     "websockets==11.0.3",
     "xvfbwrapper==0.2.9; platform_system != \"Windows\"",
     "pefile==2023.2.7; platform_system == \"Windows\"",
-    "urllib3>=2.2.2",
-    "idna>=3.7",
 ]
 keywords = ["proxy", "cloudflare", "ddos-guard", "captcha", "security"]
 classifiers = [
