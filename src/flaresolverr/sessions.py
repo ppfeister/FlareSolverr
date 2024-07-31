@@ -6,7 +6,7 @@ from uuid import uuid1
 
 from DrissionPage import ChromiumPage
 
-import utils
+from flaresolverr import utils
 
 
 @dataclass

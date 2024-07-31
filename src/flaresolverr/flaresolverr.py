@@ -4,14 +4,14 @@ import os
 import sys
 
 import certifi
-from bottle import run, response, Bottle, request, ServerAdapter
+from bottle import run as bottle_run, response, Bottle, request, ServerAdapter
 
-from bottle_plugins.error_plugin import error_plugin
-from bottle_plugins.logger_plugin import logger_plugin
-from bottle_plugins import prometheus_plugin
-from dtos import V1RequestBase
-import flaresolverr_service
-import utils
+from flaresolverr.bottle_plugins.error_plugin import error_plugin
+from flaresolverr.bottle_plugins.logger_plugin import logger_plugin
+from flaresolverr.bottle_plugins import prometheus_plugin
+from flaresolverr.dtos import V1RequestBase
+from flaresolverr import flaresolverr_service
+from flaresolverr import utils
 
 
 class JSONErrorBottle(Bottle):
@@ -57,7 +57,7 @@ def controller_v1():
     return utils.object_to_dict(res)
 
 
-if __name__ == "__main__":
+def run():
     # check python version
     if sys.version_info < (3, 9):
         raise Exception("The Python version is less than 3.9, a version equal to or higher is required.")
@@ -122,4 +122,4 @@ if __name__ == "__main__":
         def run(self, handler):
             from waitress import serve
             serve(handler, host=self.host, port=self.port, asyncore_use_poll=True)
-    run(app, host=server_host, port=server_port, quiet=True, server=WaitressServerPoll)
+    bottle_run(app, host=server_host, port=server_port, quiet=True, server=WaitressServerPoll)
