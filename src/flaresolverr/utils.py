@@ -34,7 +34,7 @@ def get_flaresolverr_version() -> str:
 
     package_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'package.json')
     if not os.path.isfile(package_path):
-        package_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'package.json')
+        package_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../package.json') # TODO Allow for file in src for downstream packaging
     with open(package_path) as f:
         FLARESOLVERR_VERSION = json.loads(f.read())['version']
         return FLARESOLVERR_VERSION
