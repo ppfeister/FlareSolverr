@@ -57,7 +57,10 @@ def controller_v1():
     return utils.object_to_dict(res)
 
 
-def run():
+def run(
+        server_host: str = os.environ.get('HOST', '0.0.0.0'),
+        server_port: int = int(os.environ.get('PORT', 8191)),
+):
     # check python version
     if sys.version_info < (3, 9):
         raise Exception("The Python version is less than 3.9, a version equal to or higher is required.")
@@ -78,8 +81,6 @@ def run():
     log_level = os.environ.get('LOG_LEVEL', 'info').upper()
     log_html = utils.get_config_log_html()
     headless = utils.get_config_headless()
-    server_host = os.environ.get('HOST', '0.0.0.0')
-    server_port = int(os.environ.get('PORT', 8191))
 
     # configure logger
     logger_format = '%(asctime)s %(levelname)-8s %(message)s'
