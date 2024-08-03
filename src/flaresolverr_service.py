@@ -250,24 +250,18 @@ def _resolve_challenge(req: V1RequestBase, method: str) -> ChallengeResolutionT:
 
 def click_verify(driver: ChromiumPage) -> DataPacket:
     try:
-        bde = (
-            driver
-            .ele("@Style=border: 0px; margin: 0px; padding: 0px;", timeout=10)
-            .shadow_root
-            .ele("tag:iframe", timeout=10)
-            .ele('tag:body', timeout=10)
-            .shadow_root
-        )
-        ve = bde.ele("text:Verify you are human", timeout=10)
+        challengeSolution = driver.ele("@name=cf-turnstile-response", timeout=5)
+        challengeWrapper = challengeSolution.parent()
+        challengeIframe = challengeWrapper.shadow_root.ele("tag:iframe", timeout=5)
+        challengeIframeBody = challengeIframe.ele("tag:body", timeout=5).shadow_root
+        challengeButton = challengeIframeBody.ele("tag:input", timeout=5)
+        challengeButton.focus()
 
         driver.listen.resume()
-        ve.click()
+        challengeButton.click()
         data = driver.listen.wait(count=1,timeout=5)
-
         if isinstance(data, DataPacket):
             return data
-
-        return None
 
     except Exception as e:
         logging.debug("Cloudflare verify checkbox not found on the page. %s", repr(e))
@@ -346,6 +340,7 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
             if search_challenge(driver):
                 if attempt == 1:
                     logging.info("Challenge detected.")
+                    driver.run_js("try { turnstile.reset() } catch(e) { }") # https://github.com/g1879/DrissionPage/issues/294
 
                 data = click_verify(driver)
             else:
@@ -355,7 +350,7 @@ def _evil_logic(req: V1RequestBase, driver: ChromiumPage, method: str) -> Challe
                 else:
                     logging.info("Challenge solved!")
                     res.message = "Challenge solved!"
-                break
+                challenge_found = False
 
         except Exception as e:
             logging.debug("Cloudflare check exception")

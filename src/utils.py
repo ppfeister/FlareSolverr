@@ -124,6 +124,52 @@ def create_proxy_extension(proxy: dict) -> str:
 
     return proxy_extension_dir
 
+# https://github.com/TheFalloutOf76/CDP-bug-MouseEvent-.screenX-.screenY-patcher
+def create_cloudflare_extension() -> str:
+    manifest_json = """
+    {
+        "manifest_version": 3,
+        "name": "Turnstile Patcher",
+        "version": "2.1",
+        "content_scripts": [
+            {
+                "js": [
+                    "./script.js"
+                ],
+                "matches": [
+                    "<all_urls>"
+                ],
+                "run_at": "document_start",
+                "all_frames": true,
+                "world": "MAIN"
+            }
+        ]
+    }
+    """
+
+    script_js = """
+    function getRandomInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    let screenX = getRandomInt(800, 1200);
+    let screenY = getRandomInt(400, 600);
+
+    Object.defineProperty(MouseEvent.prototype, 'screenX', { value: screenX });
+
+    Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
+    """
+
+    cloudflare_extension_dir = tempfile.mkdtemp()
+
+    with open(os.path.join(cloudflare_extension_dir, "manifest.json"), "w") as f:
+        f.write(manifest_json)
+
+    with open(os.path.join(cloudflare_extension_dir, "script.js"), "w") as f:
+        f.write(script_js)
+
+    return cloudflare_extension_dir
+
 def get_webdriver_data_path() -> Path:
     return Path(gettempdir()) / 'FlareSolverr'
 
@@ -185,6 +231,9 @@ def get_webdriver(proxy: dict = None, user_data_path: str = None) -> ChromiumPag
         proxy_url = proxy['url']
         logging.debug("Using webdriver proxy: %s", proxy_url)
         options.set_argument('--proxy-server=%s' % proxy_url)
+
+    cloudflare_extension_dir = create_cloudflare_extension()
+    options.add_extension(cloudflare_extension_dir)
 
     windows_headless = False
     if get_config_headless():
