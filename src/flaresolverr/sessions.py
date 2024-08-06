@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from uuid import uuid1
 
-from DrissionPage import ChromiumPage
+from flaresolverr.DrissionPage import ChromiumPage
 
-import utils
+from flaresolverr import utils
 
 
 @dataclass

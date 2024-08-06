@@ -11,7 +11,7 @@ from uuid import uuid1
 from pathlib import Path
 from tempfile import gettempdir
 
-from DrissionPage import ChromiumPage, ChromiumOptions
+from flaresolverr.DrissionPage import ChromiumPage, ChromiumOptions
 # from DrissionPage.common import Settings
 
 FLARESOLVERR_VERSION = None

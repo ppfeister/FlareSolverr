@@ -7,14 +7,15 @@ from html import escape
 from urllib.parse import unquote, quote
 
 from func_timeout import FunctionTimedOut, func_timeout
-from DrissionPage import ChromiumPage
-from DrissionPage._units.listener import DataPacket
 
-import utils
-from dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
+from flaresolverr.DrissionPage import ChromiumPage
+from flaresolverr.DrissionPage._units.listener import DataPacket
+
+from flaresolverr import utils
+from flaresolverr.dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
                   ChallengeResolutionT, HealthResponse, IndexResponse,
                   V1RequestBase, V1ResponseBase)
-from sessions import SessionsStorage
+from flaresolverr.sessions import SessionsStorage
 
 ACCESS_DENIED_TITLES = [
     # Cloudflare
