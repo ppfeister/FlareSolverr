@@ -4,7 +4,7 @@ import os
 import sys
 
 import certifi
-from bottle import run, response, Bottle, request, ServerAdapter
+from bottle import run as bottle_run, response, Bottle, request, ServerAdapter
 
 from bottle_plugins.error_plugin import error_plugin
 from bottle_plugins.logger_plugin import logger_plugin
@@ -57,7 +57,11 @@ def controller_v1():
     return utils.object_to_dict(res)
 
 
-if __name__ == "__main__":
+def run(
+        server_host: str = os.environ.get('HOST', '0.0.0.0'),
+        server_port: int = int(os.environ.get('PORT', 8191)),
+        
+):
     # check python version
     if sys.version_info < (3, 9):
         raise Exception("The Python version is less than 3.9, a version equal to or higher is required.")
@@ -78,8 +82,6 @@ if __name__ == "__main__":
     log_level = os.environ.get('LOG_LEVEL', 'info').upper()
     log_html = utils.get_config_log_html()
     headless = utils.get_config_headless()
-    server_host = os.environ.get('HOST', '0.0.0.0')
-    server_port = int(os.environ.get('PORT', 8191))
 
     # configure logger
     logger_format = '%(asctime)s %(levelname)-8s %(message)s'
@@ -125,4 +127,4 @@ if __name__ == "__main__":
         def run(self, handler):
             from waitress import serve
             serve(handler, host=self.host, port=self.port, asyncore_use_poll=True)
-    run(app, host=server_host, port=server_port, quiet=True, server=WaitressServerPoll)
+    bottle_run(app, host=server_host, port=server_port, quiet=True, server=WaitressServerPoll)

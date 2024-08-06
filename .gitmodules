@@ -1,0 +1,3 @@
+[submodule "src/flaresolverr/DrissionPage"]
+	path = src/flaresolverr/DrissionPage
+	url = https://github.com/g1879/DrissionPage.git
