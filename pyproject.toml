@@ -35,6 +35,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+[project.optional-dependencies]
+test = ["WebTest==3.0.0"]
 [tool.pdm.dev-dependencies]
 test = [
     "WebTest==3.0.0",
