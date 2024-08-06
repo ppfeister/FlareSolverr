@@ -25,6 +25,7 @@ dependencies = [
     "click",               # required by DrissionPage
     "tldextract",          # required by DrissionPage
     "psutil",              # required by DrissionPage
+    "openpyxl>=3.1.5",     # required by DrissionPage (required by DataRecorder)
 ]
 requires-python = ">=3.11"
 readme = "README.md"
