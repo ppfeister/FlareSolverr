@@ -12,17 +12,20 @@ from re import findall
 from threading import Thread
 from time import perf_counter, sleep
 
-from ...DataRecorder.tools import make_valid_name
+from DataRecorder.tools import make_valid_name
 
 from .._base.base import BasePage
 from .._elements.chromium_element import run_js, make_chromium_eles
 from .._elements.none_element import NoneElement
 from .._elements.session_element import make_session_ele
-from .._functions.locator import get_loc, is_loc
+from .._functions.cookies import CookiesList
+from .._functions.elements import SessionElementsList, get_frame
+from .._functions.locator import get_loc
 from .._functions.settings import Settings
 from .._functions.tools import raise_error
 from .._functions.web import location_in_viewport
 from .._units.actions import Actions
+from .._units.console import Console
 from .._units.listener import Listener
 from .._units.rect import TabRect
 from .._units.screencast import Screencast
@@ -36,15 +39,15 @@ __ERROR__ = 'error'
 
 
 class ChromiumBase(BasePage):
-    """标签页、frame、页面基类"""
+    """标签页、Frame、Page基类"""
 
-    def __init__(self, address, tab_id=None, timeout=None):
+    def __init__(self, browser, target_id=None):
         """
-        :param address: 浏览器 ip:port
-        :param tab_id: 要控制的标签页id，不指定默认为激活的
-        :param timeout: 超时时间（秒）
+        :param browser: Chromium
+        :param target_id: 要控制的target id，不指定默认为激活的标签页
         """
         super().__init__()
+        self._browser = browser
         self._is_loading = None
         self._root_id = None  # object id
         self._set = None
@@ -56,6 +59,7 @@ class ChromiumBase(BasePage):
         self._rect = None
         self._wait = None
         self._scroll = None
+        self._console = None
         self._upload_list = None
         self._doc_got = False  # 用于在LoadEventFired和FrameStoppedLoading间标记是否已获取doc
         self._download_path = None
@@ -65,35 +69,21 @@ class ChromiumBase(BasePage):
         if not hasattr(self, '_listener'):
             self._listener = None
 
-        if isinstance(address, int) or (isinstance(address, str) and address.isdigit()):
-            address = f'127.0.0.1:{address}'
-
-        self._d_set_start_options(address)
         self._d_set_runtime_settings()
-        self._connect_browser(tab_id)
-        if timeout is not None:
-            self.timeout = timeout
-
-    def _d_set_start_options(self, address):
-        """设置浏览器启动属性
-        :param address: 'ip:port'
-        :return: None
-        """
-        self.address = address.replace('localhost', '127.0.0.1').lstrip('http://').lstrip('https://')
+        self._connect_browser(target_id)
 
     def _d_set_runtime_settings(self):
-        self._timeouts = Timeout(self)
-        self._load_mode = 'normal'
+        pass
 
-    def _connect_browser(self, tab_id=None):
+    def _connect_browser(self, target_id=None):
         """连接浏览器，在第一次时运行
-        :param tab_id: 要控制的标签页id，不指定默认为激活的
+        :param target_id: 要控制的target id，不指定默认为激活的标签页
         :return: None
         """
         self._is_reading = False
 
-        if not tab_id:
-            tabs = self.browser.driver.get(f'http://{self.address}/json').json()
+        if not target_id:
+            tabs = self.browser._driver.get(f'http://{self.browser.address}/json').json()
             tabs = [(i['id'], i['url']) for i in tabs
                     if i['type'] in ('page', 'webview') and not i['url'].startswith('devtools://')]
             dialog = None
@@ -101,30 +91,30 @@ class ChromiumBase(BasePage):
                 for k, t in enumerate(tabs):
                     if t[1] == 'chrome://privacy-sandbox-dialog/notice':
                         dialog = k
-                    elif not tab_id:
-                        tab_id = t[0]
+                    elif not target_id:
+                        target_id = t[0]
 
-                    if tab_id and dialog is not None:
+                    if target_id and dialog is not None:
                         break
 
                 if dialog is not None:
                     close_privacy_dialog(self, tabs[dialog][0])
 
             else:
-                tab_id = tabs[0][0]
+                target_id = tabs[0][0]
 
-        self._driver_init(tab_id)
+        self._driver_init(target_id)
         if self._js_ready_state == 'complete' and self._ready_state is None:
             self._get_document()
             self._ready_state = 'complete'
 
-    def _driver_init(self, tab_id):
-        """新建页面、页面刷新、切换标签页后要进行的cdp参数初始化
-        :param tab_id: 要跳转到的标签页id
+    def _driver_init(self, target_id):
+        """新建页面、页面刷新后要进行的cdp参数初始化
+        :param target_id: 要跳转到的target id
         :return: None
         """
         self._is_loading = True
-        self._driver = self.browser._get_driver(tab_id, self)
+        self._driver = self.browser._get_driver(target_id, self)
 
         self._alert = Alert()
         self._driver.set_callback('Page.javascriptDialogOpening', self._on_alert_open, immediate=True)
@@ -134,7 +124,7 @@ class ChromiumBase(BasePage):
         self._driver.run('Page.enable')
         self._driver.run('Emulation.setFocusEmulationEnabled', enabled=True)
 
-        r = self.run_cdp('Page.getFrameTree')
+        r = self._run_cdp('Page.getFrameTree')
         for i in findall(r"'id': '(.*?)'", str(r)):
             self.browser._frames[i] = self.tab_id
         if not hasattr(self, '_frame_id'):
@@ -160,11 +150,11 @@ class ChromiumBase(BasePage):
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
             try:
-                b_id = self.run_cdp('DOM.getDocument', _timeout=timeout)['root']['backendNodeId']
+                b_id = self._run_cdp('DOM.getDocument', _timeout=timeout)['root']['backendNodeId']
                 timeout = end_time - perf_counter()
                 timeout = 1 if timeout <= 1 else timeout
-                self._root_id = self.run_cdp('DOM.resolveNode', backendNodeId=b_id,
-                                             _timeout=timeout)['object']['objectId']
+                self._root_id = self._run_cdp('DOM.resolveNode', backendNodeId=b_id,
+                                              _timeout=timeout)['object']['objectId']
                 result = True
                 break
 
@@ -180,7 +170,7 @@ class ChromiumBase(BasePage):
             result = False
 
         if result:
-            r = self.run_cdp('Page.getFrameTree')
+            r = self._run_cdp('Page.getFrameTree', _ignore=PageDisconnectedError)
             for i in findall(r"'id': '(.*?)'", str(r)):
                 self.browser._frames[i] = self.tab_id
 
@@ -217,7 +207,7 @@ class ChromiumBase(BasePage):
     def _onDomContentEventFired(self, **kwargs):
         """在页面刷新、变化后重新读取页面内容"""
         if self._load_mode == 'eager':
-            self.run_cdp('Page.stopLoading')
+            self._run_cdp('Page.stopLoading')
         if self._get_document(self._load_end_time - perf_counter() - .1):
             self._doc_got = True
         self._ready_state = 'interactive'
@@ -242,10 +232,10 @@ class ChromiumBase(BasePage):
             if 'backendNodeId' not in kwargs:
                 raise TypeError('该输入框无法接管，请改用对<input>元素输入路径的方法设置。')
             files = self._upload_list if kwargs['mode'] == 'selectMultiple' else self._upload_list[:1]
-            self.run_cdp('DOM.setFileInputFiles', files=files, backendNodeId=kwargs['backendNodeId'])
+            self._run_cdp('DOM.setFileInputFiles', files=files, backendNodeId=kwargs['backendNodeId'])
 
             self.driver.set_callback('Page.fileChooserOpened', None)
-            self.run_cdp('Page.setInterceptFileChooserDialog', enabled=False)
+            self._run_cdp('Page.setInterceptFileChooserDialog', enabled=False)
             self._upload_list = None
 
     def __call__(self, locator, index=1, timeout=None):
@@ -327,6 +317,18 @@ class ChromiumBase(BasePage):
         return self._rect
 
     @property
+    def console(self):
+        """返回获取控制台信息的对象"""
+        if self._console is None:
+            self._console = Console(self)
+        return self._console
+
+    @property
+    def timeout(self):
+        """返回timeout设置"""
+        return self._timeouts.base
+
+    @property
     def timeouts(self):
         """返回timeouts设置"""
         return self._timeouts
@@ -347,23 +349,23 @@ class ChromiumBase(BasePage):
     @property
     def title(self):
         """返回当前页面title"""
-        return self.run_cdp_loaded('Target.getTargetInfo', targetId=self._target_id)['targetInfo']['title']
+        return self._run_cdp_loaded('Target.getTargetInfo', targetId=self._target_id)['targetInfo']['title']
 
     @property
     def url(self):
         """返回当前页面url"""
-        return self.run_cdp_loaded('Target.getTargetInfo', targetId=self._target_id)['targetInfo']['url']
+        return self._run_cdp_loaded('Target.getTargetInfo', targetId=self._target_id)['targetInfo']['url']
 
     @property
     def _browser_url(self):
-        """用于被WebPage覆盖"""
+        """用于被MixTab覆盖"""
         return self.url
 
     @property
     def html(self):
         """返回当前页面html文本"""
         self.wait.doc_loaded()
-        return self.run_cdp('DOM.getOuterHTML', objectId=self._root_id)['outerHTML']
+        return self._run_cdp('DOM.getOuterHTML', objectId=self._root_id)['outerHTML']
 
     @property
     def json(self):
@@ -381,12 +383,12 @@ class ChromiumBase(BasePage):
     @property
     def _target_id(self):
         """返回当前标签页id"""
-        return self.driver.id if not self.driver._stopped.is_set() else ''
+        return self.driver.id if self.driver.is_running else ''
 
     @property
     def active_ele(self):
         """返回当前焦点所在元素"""
-        return self.run_js_loaded('return document.activeElement;')
+        return self._run_js_loaded('return document.activeElement;')
 
     @property
     def load_mode(self):
@@ -396,7 +398,7 @@ class ChromiumBase(BasePage):
     @property
     def user_agent(self):
         """返回user agent"""
-        return self.run_cdp('Runtime.evaluate', expression='navigator.userAgent;')['result']['value']
+        return self._run_cdp('Runtime.evaluate', expression='navigator.userAgent;')['result']['value']
 
     @property
     def upload_list(self):
@@ -407,7 +409,7 @@ class ChromiumBase(BasePage):
     def _js_ready_state(self):
         """返回js获取的ready state信息"""
         try:
-            return self.run_cdp('Runtime.evaluate', expression='document.readyState;', _timeout=3)['result']['value']
+            return self._run_cdp('Runtime.evaluate', expression='document.readyState;', _timeout=3)['result']['value']
         except ContextLostError:
             return None
         except TimeoutError:
@@ -419,9 +421,8 @@ class ChromiumBase(BasePage):
         :param cmd_args: 参数
         :return: 执行的结果
         """
-        ignore = cmd_args.pop('_ignore', None)
         r = self.driver.run(cmd, **cmd_args)
-        return r if __ERROR__ not in r else raise_error(r, ignore)
+        return r if __ERROR__ not in r else raise_error(r, user=True)
 
     def run_cdp_loaded(self, cmd, **cmd_args):
         """执行Chrome DevTools Protocol语句，执行前等待页面加载完毕
@@ -430,7 +431,27 @@ class ChromiumBase(BasePage):
         :return: 执行的结果
         """
         self.wait.doc_loaded()
-        return self.run_cdp(cmd, **cmd_args)
+        r = self.driver.run(cmd, **cmd_args)
+        return r if __ERROR__ not in r else raise_error(r, user=True)
+
+    def _run_cdp(self, cmd, **cmd_args):
+        """执行Chrome DevTools Protocol语句
+        :param cmd: 协议项目
+        :param cmd_args: 参数
+        :return: 执行的结果
+        """
+        ignore = cmd_args.pop('_ignore', None)
+        r = self.driver.run(cmd, **cmd_args)
+        return r if __ERROR__ not in r else raise_error(r, ignore)
+
+    def _run_cdp_loaded(self, cmd, **cmd_args):
+        """执行Chrome DevTools Protocol语句，执行前等待页面加载完毕
+        :param cmd: 协议项目
+        :param cmd_args: 参数
+        :return: 执行的结果
+        """
+        self.wait.doc_loaded()
+        return self._run_cdp(cmd, **cmd_args)
 
     def run_js(self, script, *args, as_expr=False, timeout=None):
         """运行javascript代码
@@ -440,9 +461,30 @@ class ChromiumBase(BasePage):
         :param timeout: js超时时间（秒），为None则使用页面timeouts.script设置
         :return: 运行的结果
         """
-        return run_js(self, script, as_expr, self.timeouts.script if timeout is None else timeout, args)
+        return self._run_js(script, *args, as_expr=as_expr, timeout=timeout)
 
     def run_js_loaded(self, script, *args, as_expr=False, timeout=None):
+        """运行javascript代码，执行前等待页面加载完毕
+        :param script: js文本或js文件路径
+        :param args: 参数，按顺序在js文本中对应arguments[0]、arguments[1]...
+        :param as_expr: 是否作为表达式运行，为True时args无效
+        :param timeout: js超时时间（秒），为None则使用页面timeouts.script属性值
+        :return: 运行的结果
+        """
+        self.wait.doc_loaded()
+        return self._run_js(script, *args, as_expr=as_expr, timeout=timeout)
+
+    def _run_js(self, script, *args, as_expr=False, timeout=None):
+        """运行javascript代码
+        :param script: js文本或js文件路径
+        :param args: 参数，按顺序在js文本中对应arguments[0]、arguments[1]...
+        :param as_expr: 是否作为表达式运行，为True时args无效
+        :param timeout: js超时时间（秒），为None则使用页面timeouts.script设置
+        :return: 运行的结果
+        """
+        return run_js(self, script, as_expr, self.timeouts.script if timeout is None else timeout, args)
+
+    def _run_js_loaded(self, script, *args, as_expr=False, timeout=None):
         """运行javascript代码，执行前等待页面加载完毕
         :param script: js文本或js文件路径
         :param args: 参数，按顺序在js文本中对应arguments[0]、arguments[1]...
@@ -476,29 +518,27 @@ class ChromiumBase(BasePage):
                                               show_errmsg=show_errmsg, timeout=timeout)
         return self._url_available
 
-    def cookies(self, as_dict=False, all_domains=False, all_info=False):
+    def cookies(self, all_domains=False, all_info=False):
         """返回cookies信息
-        :param as_dict: 为True时以dict格式返回且all_info无效，为False时返回list
         :param all_domains: 是否返回所有域的cookies
         :param all_info: 是否返回所有信息，为False时只返回name、value、domain
         :return: cookies信息
         """
         txt = 'Storage' if all_domains else 'Network'
-        cookies = self.run_cdp_loaded(f'{txt}.getCookies')['cookies']
+        cookies = self._run_cdp_loaded(f'{txt}.getCookies')['cookies']
 
-        if as_dict:
-            return {cookie['name']: cookie['value'] for cookie in cookies}
-        elif all_info:
-            return cookies
+        if all_info:
+            r = cookies
         else:
-            return [{'name': cookie['name'], 'value': cookie['value'], 'domain': cookie['domain']}
-                    for cookie in cookies]
+            r = [{'name': cookie['name'], 'value': cookie['value'], 'domain': cookie['domain']} for cookie in cookies]
+
+        return CookiesList(r)
 
     def ele(self, locator, index=1, timeout=None):
         """获取一个符合条件的元素对象
         :param locator: 定位符或元素对象
         :param index: 获取第几个元素，从1开始，可传入负数获取倒数第几个
-        :param timeout: 查找超时时间（秒）
+        :param timeout: 查找超时时间（秒），默认与页面等待时间一致
         :return: ChromiumElement对象
         """
         return self._ele(locator, timeout=timeout, index=index, method='ele()')
@@ -506,32 +546,37 @@ class ChromiumBase(BasePage):
     def eles(self, locator, timeout=None):
         """获取所有符合条件的元素对象
         :param locator: 定位符或元素对象
-        :param timeout: 查找超时时间（秒）
+        :param timeout: 查找超时时间（秒），默认与页面等待时间一致
         :return: ChromiumElement对象组成的列表
         """
         return self._ele(locator, timeout=timeout, index=None)
 
-    def s_ele(self, locator=None, index=1):
+    def s_ele(self, locator=None, index=1, timeout=None):
         """查找一个符合条件的元素以SessionElement形式返回，处理复杂页面时效率很高
         :param locator: 元素的定位信息，可以是loc元组，或查询字符串
         :param index: 获取第几个，从1开始，可传入负数获取倒数第几个
+        :param timeout: 查找元素超时时间（秒），默认与页面等待时间一致
         :return: SessionElement对象或属性、文本
         """
-        return make_session_ele(self, locator, index=index, method='s_ele()')
+        return (NoneElement(self, method='s_ele()', args={'locator': locator, 'index': index})
+                if locator and not self.wait.eles_loaded(locator, timeout=timeout)
+                else make_session_ele(self, locator, index=index, method='s_ele()'))
 
-    def s_eles(self, locator):
+    def s_eles(self, locator, timeout=None):
         """查找所有符合条件的元素以SessionElement列表形式返回
         :param locator: 元素的定位信息，可以是loc元组，或查询字符串
+        :param timeout: 查找元素超时时间（秒），默认与页面等待时间一致
         :return: SessionElement对象组成的列表
         """
-        return make_session_ele(self, locator, index=None)
+        return (make_session_ele(self, locator, index=None)
+                if self.wait.eles_loaded(locator, timeout=timeout) else SessionElementsList())
 
     def _find_elements(self, locator, timeout=None, index=1, relative=False, raise_err=None):
         """执行元素查找
         :param locator: 定位符或元素对象
         :param timeout: 查找超时时间（秒）
         :param index: 第几个结果，从1开始，可传入负数获取倒数第几个，为None返回所有
-        :param relative: WebPage用的表示是否相对定位的参数
+        :param relative: MixTab用的表示是否相对定位的参数
         :param raise_err: 找不到元素是是否抛出异常，为None时根据全局设置
         :return: ChromiumElement对象或元素对象组成的列表
         """
@@ -605,7 +650,7 @@ class ChromiumBase(BasePage):
         :return: None
         """
         self._is_loading = True
-        self.run_cdp('Page.reload', ignoreCache=ignore_cache)
+        self._run_cdp('Page.reload', ignoreCache=ignore_cache)
         self.wait.load_start()
 
     def forward(self, steps=1):
@@ -630,7 +675,7 @@ class ChromiumBase(BasePage):
         if steps == 0:
             return
 
-        history = self.run_cdp('Page.getNavigationHistory')
+        history = self._run_cdp('Page.getNavigationHistory')
         index = history['currentIndex']
         history = history['entries']
         direction = 1 if steps > 0 else -1
@@ -646,12 +691,12 @@ class ChromiumBase(BasePage):
 
         if nid:
             self._is_loading = True
-            self.run_cdp('Page.navigateToHistoryEntry', entryId=nid)
+            self._run_cdp('Page.navigateToHistoryEntry', entryId=nid)
 
     def stop_loading(self):
         """页面停止加载"""
         try:
-            self.run_cdp('Page.stopLoading')
+            self._run_cdp('Page.stopLoading')
             end_time = perf_counter() + 5
             while self._ready_state != 'complete' and perf_counter() < end_time:
                 sleep(.1)
@@ -669,7 +714,7 @@ class ChromiumBase(BasePage):
             return
         ele = self._ele(loc_or_ele, raise_err=False)
         if ele:
-            self.run_cdp('DOM.removeNode', nodeId=ele._node_id, _ignore=ElementLostError)
+            self._run_cdp('DOM.removeNode', nodeId=ele._node_id, _ignore=ElementLostError)
 
     def add_ele(self, html_or_info, insert_to=None, before=None):
         """新建一个元素
@@ -725,7 +770,7 @@ class ChromiumBase(BasePage):
         else:
             raise TypeError('html_or_info参数必须是html文本或tuple，tuple格式为(tag, {name: value})。')
 
-        ele = self.run_js(js, *args)
+        ele = self._run_js(js, *args)
         return ele
 
     def get_frame(self, loc_ind_ele, timeout=None):
@@ -734,41 +779,7 @@ class ChromiumBase(BasePage):
         :param timeout: 查找元素超时时间（秒）
         :return: ChromiumFrame对象
         """
-        if isinstance(loc_ind_ele, str):
-            if not is_loc(loc_ind_ele):
-                xpath = f'xpath://*[(name()="iframe" or name()="frame") and ' \
-                        f'(@name="{loc_ind_ele}" or @id="{loc_ind_ele}")]'
-            else:
-                xpath = loc_ind_ele
-            ele = self._ele(xpath, timeout=timeout)
-            if ele and ele._type != 'ChromiumFrame':
-                raise TypeError('该定位符不是指向frame元素。')
-            r = ele
-
-        elif isinstance(loc_ind_ele, tuple):
-            ele = self._ele(loc_ind_ele, timeout=timeout)
-            if ele and ele._type != 'ChromiumFrame':
-                raise TypeError('该定位符不是指向frame元素。')
-            r = ele
-
-        elif isinstance(loc_ind_ele, int):
-            if loc_ind_ele == 0:
-                loc_ind_ele = 1
-            elif loc_ind_ele < 0:
-                loc_ind_ele = f'last()+{loc_ind_ele}+1'
-            xpath = f'xpath:(//*[name()="frame" or name()="iframe"])[{loc_ind_ele}]'
-            r = self._ele(xpath, timeout=timeout)
-
-        elif loc_ind_ele._type == 'ChromiumFrame':
-            r = loc_ind_ele
-
-        else:
-            raise TypeError('必须传入定位符、iframe序号、id、name、ChromiumFrame对象其中之一。')
-
-        if isinstance(r, NoneElement):
-            r.method = 'get_frame()'
-            r.args = {'loc_ind_ele': loc_ind_ele}
-        return r
+        return get_frame(self, loc_ind_ele=loc_ind_ele, timeout=timeout)
 
     def get_frames(self, locator=None, timeout=None):
         """获取所有符合条件的frame对象
@@ -786,7 +797,7 @@ class ChromiumBase(BasePage):
         :return: sessionStorage一个或所有项内容
         """
         js = f'sessionStorage.getItem("{item}")' if item else 'sessionStorage'
-        return self.run_js_loaded(js, as_expr=True)
+        return self._run_js_loaded(js, as_expr=True)
 
     def local_storage(self, item=None):
         """返回localStorage信息，不设置item则获取全部
@@ -794,7 +805,7 @@ class ChromiumBase(BasePage):
         :return: localStorage一个或所有项内容
         """
         js = f'localStorage.getItem("{item}")' if item else 'localStorage'
-        return self.run_js_loaded(js, as_expr=True)
+        return self._run_js_loaded(js, as_expr=True)
 
     def get_screenshot(self, path=None, name=None, as_bytes=None, as_base64=None,
                        full_page=False, left_top=None, right_bottom=None):
@@ -816,8 +827,8 @@ class ChromiumBase(BasePage):
         :param script: js文本
         :return: 添加的脚本的id
         """
-        js_id = self.run_cdp('Page.addScriptToEvaluateOnNewDocument', source=script,
-                             includeCommandLineAPI=True)['identifier']
+        js_id = self._run_cdp('Page.addScriptToEvaluateOnNewDocument', source=script,
+                              includeCommandLineAPI=True)['identifier']
         self._init_jss.append(js_id)
         return js_id
 
@@ -828,11 +839,11 @@ class ChromiumBase(BasePage):
         """
         if script_id is None:
             for js_id in self._init_jss:
-                self.run_cdp('Page.removeScriptToEvaluateOnNewDocument', identifier=js_id)
+                self._run_cdp('Page.removeScriptToEvaluateOnNewDocument', identifier=js_id)
             self._init_jss.clear()
 
         elif script_id in self._init_jss:
-            self.run_cdp('Page.removeScriptToEvaluateOnNewDocument', identifier=script_id)
+            self._run_cdp('Page.removeScriptToEvaluateOnNewDocument', identifier=script_id)
             self._init_jss.remove(script_id)
 
     def clear_cache(self, session_storage=True, local_storage=True, cache=True, cookies=True):
@@ -844,24 +855,25 @@ class ChromiumBase(BasePage):
         :return: None
         """
         if session_storage or local_storage:
-            self.run_cdp_loaded('DOMStorage.enable')
-            i = self.run_cdp('Storage.getStorageKeyForFrame', frameId=self._frame_id)['storageKey']
+            self._run_cdp_loaded('DOMStorage.enable')
+            i = self._run_cdp('Storage.getStorageKeyForFrame', frameId=self._frame_id)['storageKey']
             if session_storage:
-                self.run_cdp('DOMStorage.clear', storageId={'storageKey': i, 'isLocalStorage': False})
+                self._run_cdp('DOMStorage.clear', storageId={'storageKey': i, 'isLocalStorage': False})
             if local_storage:
-                self.run_cdp('DOMStorage.clear', storageId={'storageKey': i, 'isLocalStorage': True})
-            self.run_cdp_loaded('DOMStorage.disable')
+                self._run_cdp('DOMStorage.clear', storageId={'storageKey': i, 'isLocalStorage': True})
+            self._run_cdp_loaded('DOMStorage.disable')
 
         if cache:
-            self.run_cdp_loaded('Network.clearBrowserCache')
+            self._run_cdp_loaded('Network.clearBrowserCache')
 
         if cookies:
-            self.run_cdp_loaded('Network.clearBrowserCookies')
+            self._run_cdp_loaded('Network.clearBrowserCookies')
 
     def disconnect(self):
         """断开与页面的连接，不关闭页面"""
         if self._driver:
-            self.browser.stop_driver(self._driver)
+            self._driver.stop()
+            self.browser._all_drivers.get(self._driver.id, set()).discard(self._driver)
 
     def reconnect(self, wait=0):
         """断开与页面原来的页面，重新建立连接
@@ -987,7 +999,7 @@ class ChromiumBase(BasePage):
             err = None
             end_time = perf_counter() + timeout
             try:
-                result = self.run_cdp('Page.navigate', frameId=self._frame_id, url=to_url, _timeout=timeout)
+                result = self._run_cdp('Page.navigate', frameId=self._frame_id, url=to_url, _timeout=timeout)
                 if 'errorText' in result:
                     err = ConnectionError(result['errorText'])
             except TimeoutError:
@@ -1087,8 +1099,8 @@ class ChromiumBase(BasePage):
 
                 v = not (location_in_viewport(self, x, y) and
                          location_in_viewport(self, right_bottom[0], right_bottom[1]))
-                if v and (self.run_js('return document.body.scrollHeight > window.innerHeight;') and
-                          not self.run_js('return document.body.scrollWidth > window.innerWidth;')):
+                if v and (self._run_js('return document.body.scrollHeight > window.innerHeight;') and
+                          not self._run_js('return document.body.scrollWidth > window.innerWidth;')):
                     x += 10
 
                 vp = {'x': x, 'y': y, 'width': w, 'height': h, 'scale': 1}
@@ -1099,7 +1111,7 @@ class ChromiumBase(BasePage):
 
         if pic_type == 'jpeg':
             args['quality'] = 100
-        png = self.run_cdp_loaded('Page.captureScreenshot', **args)['data']
+        png = self._run_cdp_loaded('Page.captureScreenshot', **args)['data']
 
         if as_base64:
             return png
@@ -1119,21 +1131,22 @@ class ChromiumBase(BasePage):
 class Timeout(object):
     """用于保存d模式timeout信息的类"""
 
-    def __init__(self, page, base=None, page_load=None, script=None, implicit=None):
+    def __init__(self, base=None, page_load=None, script=None):
         """
-        :param page: ChromiumBase页面
         :param base: 默认超时时间
         :param page_load: 页面加载超时时间
         :param script: js超时时间
         """
-        self._page = page
-        base = base if base is not None else implicit
         self.base = 10 if base is None else base
         self.page_load = 30 if page_load is None else page_load
         self.script = 30 if script is None else script
 
     def __repr__(self):
         return str({'base': self.base, 'page_load': self.page_load, 'script': self.script})
+
+    @property
+    def as_dict(self):
+        return {'base': self.base, 'page_load': self.page_load, 'script': self.script}
 
 
 class Alert(object):
@@ -1158,6 +1171,7 @@ def close_privacy_dialog(page, tid):
     :return: None
     """
     try:
+        print('ooo')
         driver = page.browser._get_driver(tid)
         driver.run('Runtime.enable')
         driver.run('DOM.enable')

@@ -14,4 +14,5 @@ from ._pages.chromium_page import ChromiumPage
 from ._pages.mix_page import MixPage
 from ._pages.mix_page import MixPage as WebPage
 
-__version__ = '4.1.0.0b19'
+__all__ = ['MixPage', 'WebPage', 'ChromiumPage', 'Chromium', 'ChromiumOptions', 'SessionOptions', 'SessionPage', '__version__']
+__version__: str = ...

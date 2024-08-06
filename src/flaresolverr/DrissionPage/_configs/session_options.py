@@ -12,7 +12,8 @@ from requests import Session
 from requests.structures import CaseInsensitiveDict
 
 from .options_manage import OptionsManager
-from .._functions.web import cookies_to_tuple, set_session_cookies, format_headers
+from .._functions.cookies import cookies_to_tuple, set_session_cookies
+from .._functions.web import format_headers
 
 
 class SessionOptions(object):
@@ -24,7 +25,7 @@ class SessionOptions(object):
         :param ini_path: ini文件路径
         """
         self.ini_path = None
-        self._download_path = None
+        self._download_path = '.'
         self._timeout = 10
         self._del_set = set()  # 记录要从ini文件删除的参数
 
@@ -83,7 +84,7 @@ class SessionOptions(object):
 
         self.set_proxies(om.proxies.get('http', None), om.proxies.get('https', None))
         self._timeout = om.timeouts.get('base', 10)
-        self._download_path = om.paths.get('download_path', None) or None
+        self._download_path = om.paths.get('download_path', '.') or '.'
 
         others = om.others
         self._retry_times = others.get('retry_times', 3)
@@ -100,7 +101,7 @@ class SessionOptions(object):
         :param path: 下载路径
         :return: 返回当前对象
         """
-        self._download_path = str(path)
+        self._download_path = '.' if path is None else str(path)
         return self
 
     @property
@@ -419,7 +420,7 @@ class SessionOptions(object):
         return session_options_to_dict(self)
 
     def make_session(self):
-        """根据内在的配置生成Session对象，ua从对象中分离"""
+        """根据内在的配置生成Session对象，headers从对象中分离"""
         s = Session()
         h = CaseInsensitiveDict(self.headers) if self.headers else CaseInsensitiveDict()
 

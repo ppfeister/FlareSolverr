@@ -10,6 +10,7 @@ from re import search, findall, DOTALL
 from time import sleep, perf_counter
 
 from .._elements.chromium_element import ChromiumElement
+from .._functions.settings import Settings
 from .._pages.chromium_base import ChromiumBase
 from .._units.listener import FrameListener
 from .._units.rect import FrameRect
@@ -21,48 +22,55 @@ from ..errors import ContextLostError, ElementLostError, PageDisconnectedError, 
 
 
 class ChromiumFrame(ChromiumBase):
+    _Frames = {}
+
+    def __new__(cls, owner, ele, info=None):
+        """
+        :param owner: frame所在的页面对象
+        :param ele: frame所在元素
+        :param info: frame所在元素信息
+        """
+        fid = info['node']['frameId'] if info else owner._run_cdp('DOM.describeNode',
+                                                                  backendNodeId=ele._backend_id)['node']['frameId']
+        if Settings.singleton_tab_obj and fid in cls._Frames:
+            r = cls._Frames[fid]
+            while not hasattr(r, '_type') or r._type != 'ChromiumFrame':
+                sleep(.1)
+            return r
+        r = object.__new__(cls)
+        cls._Frames[fid] = r
+        return r
+
     def __init__(self, owner, ele, info=None):
         """
         :param owner: frame所在的页面对象
         :param ele: frame所在元素
         :param info: frame所在元素信息
         """
-        if owner._type in ('ChromiumPage', 'WebPage'):
-            self._page = self._target_page = self.tab = owner
-            self._browser = owner.browser
-        else:  # Tab、Frame
-            self._page = owner.page
-            self._browser = self._page.browser
-            self._target_page = owner
-            self.tab = owner.tab if owner._type == 'ChromiumFrame' else owner
+        if Settings.singleton_tab_obj and hasattr(self, '_created'):
+            return
+        self._created = True
 
-        self.address = owner.address
-        self._tab_id = owner.tab_id
+        self._tab = owner._tab
+        self._target_page = owner
         self._backend_id = ele._backend_id
         self._frame_ele = ele
-        self._states = None
         self._reloading = False
 
-        node = info['node'] if not info else owner.run_cdp('DOM.describeNode', backendNodeId=ele._backend_id)['node']
+        node = info['node'] if info else owner._run_cdp('DOM.describeNode', backendNodeId=ele._backend_id)['node']
         self._frame_id = node['frameId']
         if self._is_inner_frame():
             self._is_diff_domain = False
             self.doc_ele = ChromiumElement(self._target_page, backend_id=node['contentDocument']['backendNodeId'])
-            super().__init__(owner.address, owner.tab_id, owner.timeout)
+            super().__init__(owner.browser, owner.driver.id)
         else:
             self._is_diff_domain = True
             delattr(self, '_frame_id')
-            super().__init__(owner.address, node['frameId'], owner.timeout)
-            obj_id = super().run_js('document;', as_expr=True)['objectId']
+            super().__init__(owner.browser, node['frameId'])
+            obj_id = super()._run_js('document;', as_expr=True)['objectId']
             self.doc_ele = ChromiumElement(self, obj_id=obj_id)
 
-        self._rect = None
         self._type = 'ChromiumFrame'
-        # end_time = perf_counter() + 2
-        # while perf_counter() < end_time:
-        #     if self.url not in (None, 'about:blank'):
-        #         break
-        #     sleep(.1)
 
     def __call__(self, locator, index=1, timeout=None):
         """在内部查找元素
@@ -90,16 +98,16 @@ class ChromiumFrame(ChromiumBase):
             self._download_path = self._target_page.download_path
         self._load_mode = self._target_page._load_mode if not self._is_diff_domain else 'normal'
 
-    def _driver_init(self, tab_id, is_init=True):
+    def _driver_init(self, target_id, is_init=True):
         """避免出现服务器500错误
-        :param tab_id: 要跳转到的标签页id
+        :param target_id: 要跳转到的target id
         :return: None
         """
         try:
-            super()._driver_init(tab_id)
+            super()._driver_init(target_id)
         except:
-            self.browser.driver.get(f'http://{self.address}/json')
-            super()._driver_init(tab_id)
+            self.browser._driver.get(f'http://{self._browser.address}/json')
+            super()._driver_init(target_id)
         self._driver.set_callback('Inspector.detached', self._onInspectorDetached, immediate=True)
         self._driver.set_callback('Page.frameDetached', None)
         self._driver.set_callback('Page.frameDetached', self._onFrameDetached, immediate=True)
@@ -116,7 +124,7 @@ class ChromiumFrame(ChromiumBase):
             self._frame_ele = ChromiumElement(self._target_page, backend_id=self._backend_id)
             end_time = perf_counter() + 2
             while perf_counter() < end_time:
-                node = self._target_page.run_cdp('DOM.describeNode', backendNodeId=self._frame_ele._backend_id)['node']
+                node = self._target_page._run_cdp('DOM.describeNode', backendNodeId=self._frame_ele._backend_id)['node']
                 if 'frameId' in node:
                     break
                 sleep(.05)
@@ -132,16 +140,16 @@ class ChromiumFrame(ChromiumBase):
             self.doc_ele = ChromiumElement(self._target_page, backend_id=node['contentDocument']['backendNodeId'])
             self._frame_id = node['frameId']
             if self._listener:
-                self._listener._to_target(self._target_page.tab_id, self.address, self)
-            super().__init__(self.address, self._target_page.tab_id, self._target_page.timeout)
+                self._listener._to_target(self._target_page.tab_id, self._browser.address, self)
+            super().__init__(self._browser, self._target_page.tab_id)
             # self.driver._debug = d_debug
 
         else:
             self._is_diff_domain = True
             if self._listener:
-                self._listener._to_target(node['frameId'], self.address, self)
+                self._listener._to_target(node['frameId'], self._browser.address, self)
             end_time = perf_counter() + self.timeouts.page_load
-            super().__init__(self.address, node['frameId'], self._target_page.timeout)
+            super().__init__(self._browser, node['frameId'])
             timeout = end_time - perf_counter()
             if timeout <= 0:
                 timeout = .5
@@ -161,17 +169,17 @@ class ChromiumFrame(ChromiumBase):
         self._is_reading = True
         try:
             if self._is_diff_domain is False:
-                node = self._target_page.run_cdp('DOM.describeNode', backendNodeId=self._backend_id)['node']
+                node = self._target_page._run_cdp('DOM.describeNode', backendNodeId=self._backend_id)['node']
                 self.doc_ele = ChromiumElement(self._target_page, backend_id=node['contentDocument']['backendNodeId'])
 
             else:
                 timeout = max(timeout, 2)
-                b_id = self.run_cdp('DOM.getDocument', _timeout=timeout)['root']['backendNodeId']
+                b_id = self._run_cdp('DOM.getDocument', _timeout=timeout)['root']['backendNodeId']
                 self.doc_ele = ChromiumElement(self, backend_id=b_id)
 
             self._root_id = self.doc_ele._obj_id
 
-            r = self.run_cdp('Page.getFrameTree')
+            r = self._run_cdp('Page.getFrameTree', _ignore=PageDisconnectedError)
             for i in findall(r"'id': '(.*?)'", str(r)):
                 self.browser._frames[i] = self.tab_id
                 return True
@@ -191,6 +199,7 @@ class ChromiumFrame(ChromiumBase):
     def _onFrameDetached(self, **kwargs):
         """同域变异域"""
         self.browser._frames.pop(kwargs['frameId'], None)
+        ChromiumFrame._Frames.pop(kwargs['frameId'], None)
         if kwargs['frameId'] == self._frame_id:
             self._reload()
 
@@ -251,11 +260,6 @@ class ChromiumFrame(ChromiumBase):
         return self.frame_ele._node_id
 
     @property
-    def page(self):
-        """返回所属Page对象"""
-        return self._page
-
-    @property
     def owner(self):
         """返回所属页面对象"""
         return self.frame_ele.owner
@@ -274,7 +278,7 @@ class ChromiumFrame(ChromiumBase):
     def url(self):
         """返回frame当前访问的url"""
         try:
-            return self.doc_ele.run_js('return this.location.href;')
+            return self.doc_ele._run_js('return this.location.href;')
         except JavaScriptError:
             return None
 
@@ -282,14 +286,14 @@ class ChromiumFrame(ChromiumBase):
     def html(self):
         """返回元素outerHTML文本"""
         tag = self.tag
-        out_html = self._target_page.run_cdp('DOM.getOuterHTML', backendNodeId=self.frame_ele._backend_id)['outerHTML']
+        out_html = self._target_page._run_cdp('DOM.getOuterHTML', backendNodeId=self.frame_ele._backend_id)['outerHTML']
         sign = search(rf'<{tag}.*?>', out_html, DOTALL).group(0)
         return f'{sign}{self.inner_html}</{tag}>'
 
     @property
     def inner_html(self):
         """返回元素innerHTML文本"""
-        return self.doc_ele.run_js('return this.documentElement.outerHTML;')
+        return self.doc_ele._run_js('return this.documentElement.outerHTML;')
 
     @property
     def title(self):
@@ -305,7 +309,7 @@ class ChromiumFrame(ChromiumBase):
     @property
     def active_ele(self):
         """返回当前焦点所在元素"""
-        return self.doc_ele.run_js('return this.activeElement;')
+        return self.doc_ele._run_js('return this.activeElement;')
 
     @property
     def xpath(self):
@@ -318,13 +322,28 @@ class ChromiumFrame(ChromiumBase):
         return self.frame_ele.css_path
 
     @property
+    def tab(self):
+        """返回frame所在tab的id"""
+        return self._tab
+
+    @property
     def tab_id(self):
         """返回frame所在tab的id"""
-        return self._tab_id
+        return self.tab.tab_id
 
     @property
     def download_path(self):
         return self._download_path
+
+    @property
+    def sr(self):
+        """返回iframe的shadow-root元素对象"""
+        return self.frame_ele.sr
+
+    @property
+    def shadow_root(self):
+        """返回iframe的shadow-root元素对象"""
+        return self.frame_ele.sr
 
     @property
     def _js_ready_state(self):
@@ -334,18 +353,18 @@ class ChromiumFrame(ChromiumBase):
 
         else:
             try:
-                return self.doc_ele.run_js('return this.readyState;')
+                return self.doc_ele._run_js('return this.readyState;')
             except ContextLostError:
                 try:
-                    node = self.run_cdp('DOM.describeNode', backendNodeId=self.frame_ele._backend_id)['node']
+                    node = self._run_cdp('DOM.describeNode', backendNodeId=self.frame_ele._backend_id)['node']
                     doc = ChromiumElement(self._target_page, backend_id=node['contentDocument']['backendNodeId'])
-                    return doc.run_js('return this.readyState;')
+                    return doc._run_js('return this.readyState;')
                 except:
                     return None
 
     def refresh(self):
         """刷新frame页面"""
-        self.doc_ele.run_js('this.location.reload();')
+        self.doc_ele._run_js('this.location.reload();')
 
     def property(self, name):
         """返回frame元素一个property属性值
@@ -376,18 +395,29 @@ class ChromiumFrame(ChromiumBase):
         :param timeout: js超时时间（秒），为None则使用页面timeouts.script设置
         :return: 运行的结果
         """
-        if script.startswith('this.scrollIntoView'):
-            return self.frame_ele.run_js(script, *args, as_expr=as_expr, timeout=timeout)
-        else:
-            return self.doc_ele.run_js(script, *args, as_expr=as_expr, timeout=timeout)
+        return self._run_js(script, *args, as_expr=as_expr, timeout=timeout)
 
-    def parent(self, level_or_loc=1, index=1):
+    def _run_js(self, script, *args, as_expr=False, timeout=None):
+        """运行javascript代码
+        :param script: js文本
+        :param args: 参数，按顺序在js文本中对应arguments[0]、arguments[1]...
+        :param as_expr: 是否作为表达式运行，为True时args无效
+        :param timeout: js超时时间（秒），为None则使用页面timeouts.script设置
+        :return: 运行的结果
+        """
+        if script.startswith('this.scrollIntoView'):
+            return self.frame_ele._run_js(script, *args, as_expr=as_expr, timeout=timeout)
+        else:
+            return self.doc_ele._run_js(script, *args, as_expr=as_expr, timeout=timeout)
+
+    def parent(self, level_or_loc=1, index=1, timeout=0):
         """返回上面某一级父元素，可指定层数或用查询语法定位
         :param level_or_loc: 第几级父元素，1开始，或定位符
         :param index: 当level_or_loc传入定位符，使用此参数选择第几个结果，1开始
+        :param timeout: 查找超时时间（秒）
         :return: 上级元素对象
         """
-        return self.frame_ele.parent(level_or_loc, index)
+        return self.frame_ele.parent(level_or_loc, index, timeout=timeout)
 
     def prev(self, locator='', index=1, timeout=0, ele_only=True):
         """返回当前元素前面一个符合条件的同级元素，可用查询语法筛选，可指定返回筛选结果的第几个
@@ -542,12 +572,12 @@ class ChromiumFrame(ChromiumBase):
         img.style.setProperty("position","fixed");
         arguments[0].insertBefore(img, this);
         return img;'''
-        new_ele = first_child.run_js(js, body)
+        new_ele = first_child._run_js(js, body)
         new_ele.scroll.to_see(center=True)
         top = int(self.frame_ele.style('border-top').split('px')[0])
         left = int(self.frame_ele.style('border-left').split('px')[0])
 
-        r = self.tab.run_cdp('Page.getLayoutMetrics')['visualViewport']
+        r = self.tab._run_cdp('Page.getLayoutMetrics')['visualViewport']
         sx = r['pageX']
         sy = r['pageY']
         r = self.tab.get_screenshot(path=path, name=name, as_bytes=as_bytes, as_base64=as_base64,
@@ -561,7 +591,7 @@ class ChromiumFrame(ChromiumBase):
         :param locator: 定位符或元素对象
         :param timeout: 查找超时时间（秒）
         :param index: 第几个结果，从1开始，可传入负数获取倒数第几个，为None返回所有
-        :param relative: WebPage用的表示是否相对定位的参数
+        :param relative: MixTab用的表示是否相对定位的参数
         :param raise_err: 找不到元素是是否抛出异常，为None时根据全局设置
         :return: ChromiumElement对象
         """
@@ -573,4 +603,4 @@ class ChromiumFrame(ChromiumBase):
 
     def _is_inner_frame(self):
         """返回当前frame是否同域"""
-        return self._frame_id in str(self._target_page.run_cdp('Page.getFrameTree')['frameTree'])
+        return self._frame_id in str(self._target_page._run_cdp('Page.getFrameTree')['frameTree'])

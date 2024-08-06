@@ -13,6 +13,9 @@ from ..errors import WaitTimeoutError, NoRectError
 
 
 class OriginWaiter(object):
+    def __init__(self, owner):
+        self._owner = owner
+
     def __call__(self, second, scope=None):
         """等待若干秒，如传入两个参数，等待时间为这两个数间的一个随机数
         :param second: 秒数
@@ -24,14 +27,89 @@ class OriginWaiter(object):
         else:
             from random import uniform
             sleep(uniform(second, scope))
+        return self._owner
+
+
+class BrowserWaiter(OriginWaiter):
+
+    def new_tab(self, timeout=None, curr_tab=None, raise_err=None):
+        """等待新标签页出现
+        :param timeout: 超时时间（秒），为None则使用页面对象timeout属性
+        :param curr_tab: 指定当前最新的tab对象或tab id，用于判断新tab出现，为None自动获取
+        :param raise_err: 等待失败时是否报错，为None时根据Settings设置
+        :return: 等到新标签页返回其id，否则返回False
+        """
+        if not curr_tab:
+            curr_tab = self._owner.tab_ids[0]
+        elif hasattr(curr_tab, '_type'):
+            curr_tab = curr_tab.tab_id
+        timeout = timeout if timeout is not None else self._owner.timeout
+        end_time = perf_counter() + timeout
+        while perf_counter() < end_time:
+            latest_tid = self._owner.tab_ids[0]
+            if curr_tab != latest_tid:
+                return latest_tid
+            sleep(.01)
+
+        if raise_err is True or Settings.raise_when_wait_failed is True:
+            raise WaitTimeoutError(f'等待新标签页失败（等待{timeout}秒）。')
+        else:
+            return False
+
+    def download_begin(self, timeout=None, cancel_it=False):
+        """等待浏览器下载开始，可将其拦截
+        :param timeout: 超时时间（秒），None使用页面对象超时时间
+        :param cancel_it: 是否取消该任务
+        :return: 成功返回任务对象，失败返回False
+        """
+        if not self._owner._dl_mgr._running:
+            raise RuntimeError('此功能需显式设置下载路径才能使用。使用set.download_path()方法、配置对象或ini文件均可。')
+        self._owner._dl_mgr.set_flag('browser', False if cancel_it else True)
+        if timeout is None:
+            timeout = self._owner.timeout
+
+        r = False
+        end_time = perf_counter() + timeout
+        while perf_counter() < end_time:
+            v = self._owner._dl_mgr.get_flag('browser')
+            if not isinstance(v, bool):
+                r = v
+                break
+            sleep(.005)
+
+        self._owner._dl_mgr.set_flag('browser', None)
+        return r
+
+    def all_downloads_done(self, timeout=None, cancel_if_timeout=True):
+        """等待所有浏览器下载任务结束
+        :param timeout: 超时时间（秒），为None时无限等待
+        :param cancel_if_timeout: 超时时是否取消剩余任务
+        :return: 是否等待成功
+        """
+        if not self._owner._dl_mgr._running:
+            raise RuntimeError('此功能需显式设置下载路径（使用set.download_path()方法、配置对象或ini文件均可）。')
+        if not timeout:
+            while self._owner._dl_mgr._missions:
+                sleep(.5)
+            return True
+
+        else:
+            end_time = perf_counter() + timeout
+            while perf_counter() < end_time:
+                if not self._owner._dl_mgr._missions:
+                    return True
+                sleep(.5)
+
+            if self._owner._dl_mgr._missions:
+                if cancel_if_timeout:
+                    for m in list(self._owner._dl_mgr._missions.values()):
+                        m.cancel()
+                return False
+            else:
+                return True
 
 
 class BaseWaiter(OriginWaiter):
-    def __init__(self, page_or_ele):
-        """
-        :param page_or_ele: 页面对象或元素对象
-        """
-        self._driver = page_or_ele
 
     def ele_deleted(self, loc_or_ele, timeout=None, raise_err=None):
         """等待元素从DOM中删除
@@ -40,7 +118,7 @@ class BaseWaiter(OriginWaiter):
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
         :return: 是否等待成功
         """
-        ele = self._driver._ele(loc_or_ele, raise_err=False, timeout=0)
+        ele = self._owner._ele(loc_or_ele, raise_err=False, timeout=0)
         return ele.wait.deleted(timeout, raise_err=raise_err) if ele else True
 
     def ele_displayed(self, loc_or_ele, timeout=None, raise_err=None):
@@ -51,11 +129,11 @@ class BaseWaiter(OriginWaiter):
         :return: 是否等待成功
         """
         if timeout is None:
-            timeout = self._driver.timeout
+            timeout = self._owner.timeout
         end_time = perf_counter() + timeout
-        ele = self._driver._ele(loc_or_ele, raise_err=False, timeout=timeout)
+        ele = self._owner._ele(loc_or_ele, raise_err=False, timeout=timeout)
         timeout = end_time - perf_counter()
-        if timeout <= 0:
+        if timeout <= 0 or not ele:
             if raise_err is True or Settings.raise_when_wait_failed is True:
                 raise WaitTimeoutError(f'等待元素显示失败（等待{timeout}秒）。')
             else:
@@ -70,9 +148,9 @@ class BaseWaiter(OriginWaiter):
         :return: 是否等待成功
         """
         if timeout is None:
-            timeout = self._driver.timeout
+            timeout = self._owner.timeout
         end_time = perf_counter() + timeout
-        ele = self._driver._ele(loc_or_ele, raise_err=False, timeout=timeout)
+        ele = self._owner._ele(loc_or_ele, raise_err=False, timeout=timeout)
         timeout = end_time - perf_counter()
         if timeout <= 0:
             if raise_err is True or Settings.raise_when_wait_failed is True:
@@ -118,13 +196,13 @@ class BaseWaiter(OriginWaiter):
         by = ('id', 'xpath', 'link text', 'partial link text', 'name', 'tag name', 'class name', 'css selector')
         locators = ((get_loc(locators)[1],) if (isinstance(locators, str) or isinstance(locators, tuple)
                                                 and locators[0] in by and len(locators) == 2)
-                    else [get_loc(l)[1] for l in locators])
+                    else [get_loc(x)[1] for x in locators])
         method = any if any_one else all
 
-        timeout = self._driver.timeout if timeout is None else timeout
+        timeout = self._owner.timeout if timeout is None else timeout
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
-            if method([_find(l, self._driver.driver) for l in locators]):
+            if method([_find(l, self._owner.driver) for l in locators]):
                 return True
             sleep(.01)
         if raise_err is True or Settings.raise_when_wait_failed is True:
@@ -150,9 +228,9 @@ class BaseWaiter(OriginWaiter):
 
     def upload_paths_inputted(self):
         """等待自动填写上传文件路径"""
-        end_time = perf_counter() + self._driver.timeout
+        end_time = perf_counter() + self._owner.timeout
         while perf_counter() < end_time:
-            if not self._driver._upload_list:
+            if not self._owner._upload_list:
                 return True
             sleep(.01)
         return False
@@ -163,22 +241,22 @@ class BaseWaiter(OriginWaiter):
         :param cancel_it: 是否取消该任务
         :return: 成功返回任务对象，失败返回False
         """
-        if not self._driver.browser._dl_mgr._running:
+        if not self._owner.browser._dl_mgr._running:
             raise RuntimeError('此功能需显式设置下载路径（使用set.download_path()方法、配置对象或ini文件均可）。')
-        self._driver.browser._dl_mgr.set_flag(self._driver.tab_id, False if cancel_it else True)
+        self._owner.browser._dl_mgr.set_flag(self._owner.tab_id, False if cancel_it else True)
         if timeout is None:
-            timeout = self._driver.timeout
+            timeout = self._owner.timeout
 
         r = False
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
-            v = self._driver.browser._dl_mgr.get_flag(self._driver.tab_id)
+            v = self._owner.browser._dl_mgr.get_flag(self._owner.tab_id)
             if not isinstance(v, bool):
                 r = v
                 break
             sleep(.005)
 
-        self._driver.browser._dl_mgr.set_flag(self._driver.tab_id, None)
+        self._owner.browser._dl_mgr.set_flag(self._owner.tab_id, None)
         return r
 
     def url_change(self, text, exclude=False, timeout=None, raise_err=None):
@@ -187,19 +265,19 @@ class BaseWaiter(OriginWaiter):
         :param exclude: 是否排除，为True时当url不包含text指定文本时返回True
         :param timeout: 超时时间（秒）
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 等待成功返回页面对象，否则返回False
         """
-        return self._change('url', text, exclude, timeout, raise_err)
+        return self._owner if self._change('url', text, exclude, timeout, raise_err) else False
 
     def title_change(self, text, exclude=False, timeout=None, raise_err=None):
         """等待title变成包含或不包含指定文本
         :param text: 用于识别的文本
         :param exclude: 是否排除，为True时当title不包含text指定文本时返回True
-        :param timeout: 超时时间（秒）
+        :param timeout: 超时时间（秒），为None使用页面设置
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 等待成功返回页面对象，否则返回False
         """
-        return self._change('title', text, exclude, timeout, raise_err)
+        return self._owner if self._change('title', text, exclude, timeout, raise_err) else False
 
     def _change(self, arg, text, exclude=False, timeout=None, raise_err=None):
         """等待指定属性变成包含或不包含指定文本
@@ -210,18 +288,26 @@ class BaseWaiter(OriginWaiter):
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
         :return: 是否等待成功
         """
+
+        def do():
+            if arg == 'url':
+                v = self._owner.url
+            elif arg == 'title':
+                v = self._owner.title
+            else:
+                raise ValueError
+            if (not exclude and text in v) or (exclude and text not in v):
+                return True
+
+        if do():
+            return True
+
         if timeout is None:
-            timeout = self._driver.timeout
+            timeout = self._owner.timeout
 
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
-            if arg == 'url':
-                val = self._driver.url
-            elif arg == 'title':
-                val = self._driver.title
-            else:
-                raise ValueError
-            if (not exclude and text in val) or (exclude and text not in val):
+            if do():
                 return True
             sleep(.05)
 
@@ -238,22 +324,23 @@ class BaseWaiter(OriginWaiter):
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
         :return: 是否等待成功
         """
-        if timeout != 0:
-            if timeout is None or timeout is True:
-                timeout = self._driver.timeout
-            end_time = perf_counter() + timeout
-            while perf_counter() < end_time:
-                if self._driver._is_loading == start:
-                    return True
-                sleep(gap)
+        if timeout is None:
+            timeout = self._owner.timeout
+        timeout = .1 if timeout <= 0 else timeout
+        end_time = perf_counter() + timeout
+        while perf_counter() < end_time:
+            if self._owner._is_loading == start:
+                return True
+            sleep(gap)
 
-            if raise_err is True or Settings.raise_when_wait_failed is True:
-                raise WaitTimeoutError(f'等待页面加载失败（等待{timeout}秒）。')
-            else:
-                return False
+        if raise_err is True or Settings.raise_when_wait_failed is True:
+            raise WaitTimeoutError(f'等待页面加载失败（等待{timeout}秒）。')
+        else:
+            return False
 
 
 class TabWaiter(BaseWaiter):
+    """标签页对象等待对象"""
 
     def downloads_done(self, timeout=None, cancel_if_timeout=True):
         """等待所有浏览器下载任务结束
@@ -261,23 +348,23 @@ class TabWaiter(BaseWaiter):
         :param cancel_if_timeout: 超时时是否取消剩余任务
         :return: 是否等待成功
         """
-        if not self._driver.browser._dl_mgr._running:
+        if not self._owner.browser._dl_mgr._running:
             raise RuntimeError('此功能需显式设置下载路径（使用set.download_path()方法、配置对象或ini文件均可）。')
         if not timeout:
-            while self._driver.browser._dl_mgr.get_tab_missions(self._driver.tab_id):
+            while self._owner.browser._dl_mgr.get_tab_missions(self._owner.tab_id):
                 sleep(.5)
             return True
 
         else:
             end_time = perf_counter() + timeout
             while perf_counter() < end_time:
-                if not self._driver.browser._dl_mgr.get_tab_missions(self._driver.tab_id):
+                if not self._owner.browser._dl_mgr.get_tab_missions(self._owner.tab_id):
                     return True
                 sleep(.5)
 
-            if self._driver.browser._dl_mgr.get_tab_missions(self._driver.tab_id):
+            if self._owner.browser._dl_mgr.get_tab_missions(self._owner.tab_id):
                 if cancel_if_timeout:
-                    for m in self._driver.browser._dl_mgr.get_tab_missions(self._driver.tab_id):
+                    for m in self._owner.browser._dl_mgr.get_tab_missions(self._owner.tab_id):
                         m.cancel()
                 return False
             else:
@@ -285,15 +372,14 @@ class TabWaiter(BaseWaiter):
 
     def alert_closed(self):
         """等待弹出框关闭"""
-        while not self._driver.states.has_alert:
+        while not self._owner.states.has_alert:
             sleep(.2)
-        while self._driver.states.has_alert:
+        while self._owner.states.has_alert:
             sleep(.2)
 
 
 class PageWaiter(TabWaiter):
-    def __init__(self, page):
-        super().__init__(page)
+    """ChromiumPage和MixPage的等待对象"""
 
     def new_tab(self, timeout=None, raise_err=None):
         """等待新标签页出现
@@ -301,18 +387,7 @@ class PageWaiter(TabWaiter):
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
         :return: 等到新标签页返回其id，否则返回False
         """
-        timeout = timeout if timeout is not None else self._driver.timeout
-        end_time = perf_counter() + timeout
-        while perf_counter() < end_time:
-            latest_tid = self._driver.tab_ids[0]
-            if self._driver.tab_id != latest_tid:
-                return latest_tid
-            sleep(.01)
-
-        if raise_err is True or Settings.raise_when_wait_failed is True:
-            raise WaitTimeoutError(f'等待新标签页失败（等待{timeout}秒）。')
-        else:
-            return False
+        return self._owner.browser.wait.new_tab(timeout=timeout, raise_err=raise_err)
 
     def all_downloads_done(self, timeout=None, cancel_if_timeout=True):
         """等待所有浏览器下载任务结束
@@ -320,45 +395,26 @@ class PageWaiter(TabWaiter):
         :param cancel_if_timeout: 超时时是否取消剩余任务
         :return: 是否等待成功
         """
-        if not self._driver.browser._dl_mgr._running:
-            raise RuntimeError('此功能需显式设置下载路径（使用set.download_path()方法、配置对象或ini文件均可）。')
-        if not timeout:
-            while self._driver.browser._dl_mgr._missions:
-                sleep(.5)
-            return True
-
-        else:
-            end_time = perf_counter() + timeout
-            while perf_counter() < end_time:
-                if not self._driver.browser._dl_mgr._missions:
-                    return True
-                sleep(.5)
-
-            if self._driver.browser._dl_mgr._missions:
-                if cancel_if_timeout:
-                    for m in list(self._driver.browser._dl_mgr._missions.values()):
-                        m.cancel()
-                return False
-            else:
-                return True
+        return self._owner.browser.wait.all_downloads_done(timeout=timeout, cancel_if_timeout=cancel_if_timeout)
 
 
 class ElementWaiter(OriginWaiter):
     """等待元素在dom中某种状态，如删除、显示、隐藏"""
 
-    def __init__(self, owner, ele):
-        """等待元素在dom中某种状态，如删除、显示、隐藏
-        :param owner: 元素所在页面
-        :param ele: 要等待的元素
-        """
-        self._owner = owner
-        self._ele = ele
+    def __init__(self, owner):
+        super().__init__(owner)
+        self._ele = owner
+
+    @property
+    def _timeout(self):
+        """返回超时设置"""
+        return self._ele.owner.timeout
 
     def deleted(self, timeout=None, raise_err=None):
         """等待元素从dom删除
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_alive', False, timeout, raise_err, err_text='等待元素被删除失败。')
 
@@ -366,7 +422,7 @@ class ElementWaiter(OriginWaiter):
         """等待元素从dom显示
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_displayed', True, timeout, raise_err, err_text='等待元素显示失败。')
 
@@ -374,7 +430,7 @@ class ElementWaiter(OriginWaiter):
         """等待元素从dom隐藏
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_displayed', False, timeout, raise_err, err_text='等待元素隐藏失败。')
 
@@ -390,7 +446,7 @@ class ElementWaiter(OriginWaiter):
         """等待当前元素不被遮盖
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_covered', False, timeout, raise_err, err_text='等待元素不被覆盖失败。')
 
@@ -398,7 +454,7 @@ class ElementWaiter(OriginWaiter):
         """等待当前元素变成可用
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_enabled', True, timeout, raise_err, err_text='等待元素变成可用失败。')
 
@@ -406,7 +462,7 @@ class ElementWaiter(OriginWaiter):
         """等待当前元素变成不可用
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         return self._wait_state('is_enabled', False, timeout, raise_err, err_text='等待元素变成不可用失败。')
 
@@ -414,14 +470,17 @@ class ElementWaiter(OriginWaiter):
         """等待当前元素变成不可用或从DOM移除
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
+        if not self._ele.states.is_enabled or not self._ele.states.is_alive:
+            return self._ele
+
         if timeout is None:
-            timeout = self._owner.timeout
+            timeout = self._timeout
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
             if not self._ele.states.is_enabled or not self._ele.states.is_alive:
-                return True
+                return self._ele
             sleep(.05)
 
         if raise_err is True or Settings.raise_when_wait_failed is True:
@@ -434,10 +493,13 @@ class ElementWaiter(OriginWaiter):
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param gap: 检测间隔时间
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         if timeout is None:
-            timeout = self._owner.timeout
+            timeout = self._timeout
+        if timeout <= 0:
+            timeout = .1
+
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
             try:
@@ -453,7 +515,7 @@ class ElementWaiter(OriginWaiter):
         while perf_counter() < end_time:
             sleep(gap)
             if self._ele.rect.size == size and self._ele.rect.location == location:
-                return True
+                return self._ele
             size = self._ele.rect.size
             location = self._ele.rect.location
 
@@ -467,11 +529,13 @@ class ElementWaiter(OriginWaiter):
         :param wait_moved: 是否等待元素运动结束
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
+        if timeout is None:
+            timeout = self._timeout
         t1 = perf_counter()
         r = self._wait_state('is_clickable', True, timeout, raise_err, err_text='等待元素可点击失败（等{}秒）。')
-        r = self.stop_moving(timeout=perf_counter() - t1) if wait_moved and r else r
+        r = self.stop_moving(timeout=timeout - perf_counter() + t1) if wait_moved and r else r
         if raise_err and not r:
             raise WaitTimeoutError(f'等待元素可点击失败（等{timeout}秒）。')
         return r
@@ -491,19 +555,19 @@ class ElementWaiter(OriginWaiter):
         :param timeout: 超时时间（秒），为None使用元素所在页面timeout属性
         :param raise_err: 等待失败时是否报错，为None时根据Settings设置
         :param err_text: 抛出错误时显示的信息
-        :return: 是否等待成功
+        :return: 成功返回元素对象，失败返回False
         """
         a = self._ele.states.__getattribute__(attr)
         if (a and mode) or (not a and not mode):
-            return True if isinstance(a, bool) else a
+            return self._ele if isinstance(a, bool) else a
 
         if timeout is None:
-            timeout = self._owner.timeout
+            timeout = self._timeout
         end_time = perf_counter() + timeout
         while perf_counter() < end_time:
             a = self._ele.states.__getattribute__(attr)
             if (a and mode) or (not a and not mode):
-                return True if isinstance(a, bool) else a
+                return self._ele if isinstance(a, bool) else a
             sleep(.05)
 
         err_text = err_text or '等待元素状态改变失败（等待{}秒）。'
@@ -514,9 +578,11 @@ class ElementWaiter(OriginWaiter):
 
 
 class FrameWaiter(BaseWaiter, ElementWaiter):
-    def __init__(self, frame):
-        """
-        :param frame: ChromiumFrame对象
-        """
-        super().__init__(frame)
-        super(BaseWaiter, self).__init__(frame, frame.frame_ele)
+    def __init__(self, owner):
+        super().__init__(owner)
+        self._ele = owner.frame_ele
+
+    @property
+    def _timeout(self):
+        """返回超时设置"""
+        return self._owner.timeout

@@ -10,7 +10,7 @@ from pathlib import Path
 from shutil import move
 from time import sleep, perf_counter
 
-from ...DataRecorder.tools import get_usable_path
+from DataRecorder.tools import get_usable_path
 
 
 class DownloadManager(object):
@@ -20,21 +20,24 @@ class DownloadManager(object):
         :param browser: Browser对象
         """
         self._browser = browser
-        self._page = browser.page
-        self._when_download_file_exists = 'rename'
-        self._save_path = None
+        # self._page = browser.page
+        # self._when_download_file_exists = 'rename'
+        # self._save_path = None
 
-        t = TabDownloadSettings(self._page.tab_id)
-        t.path = self._page.download_path
+        t = TabDownloadSettings('browser')
+        t.path = self._browser.download_path
+        t.rename = None
+        t.suffix = None
+        t.when_file_exists = 'rename'
+
         self._missions = {}  # {guid: DownloadMission}
         self._tab_missions = {}  # {tab_id: DownloadMission}
         self._flags = {}  # {tab_id: [bool, DownloadMission]}
 
-        if self._page.download_path:
-            self.set_path(self._page, self._page.download_path)
+        # if self._page.download_path:
+        #     self.set_path(self._page, self._page.download_path)
 
-        else:
-            self._running = False
+        self._running = False
 
     @property
     def missions(self):
@@ -47,13 +50,13 @@ class DownloadManager(object):
         :param path: 下载路径（绝对路径str）
         :return: None
         """
-        TabDownloadSettings(tab.tab_id).path = path
-        if tab is self._page or not self._running:
-            self._browser.driver.set_callback('Browser.downloadProgress', self._onDownloadProgress)
-            self._browser.driver.set_callback('Browser.downloadWillBegin', self._onDownloadWillBegin)
-            r = self._browser.run_cdp('Browser.setDownloadBehavior', downloadPath=path,
-                                      behavior='allowAndName', eventsEnabled=True)
-            self._save_path = path
+        tid = tab if isinstance(tab, str) else tab.tab_id
+        TabDownloadSettings(tid).path = path
+        if not self._running or tid == 'browser':
+            self._browser._driver.set_callback('Browser.downloadProgress', self._onDownloadProgress)
+            self._browser._driver.set_callback('Browser.downloadWillBegin', self._onDownloadWillBegin)
+            r = self._browser._run_cdp('Browser.setDownloadBehavior', downloadPath=self._browser._download_path,
+                                       behavior='allowAndName', eventsEnabled=True)
             if 'error' in r:
                 print('浏览器版本太低无法使用下载管理功能。')
         self._running = True
@@ -121,7 +124,7 @@ class DownloadManager(object):
         """
         mission.state = 'canceled'
         try:
-            self._browser.run_cdp('Browser.cancelDownload', guid=mission.id)
+            self._browser._run_cdp('Browser.cancelDownload', guid=mission.id)
         except:
             pass
         if mission.final_path:
@@ -134,7 +137,7 @@ class DownloadManager(object):
         """
         mission.state = 'skipped'
         try:
-            self._browser.run_cdp('Browser.cancelDownload', guid=mission.id)
+            self._browser._run_cdp('Browser.cancelDownload', guid=mission.id)
         except:
             pass
 
@@ -149,10 +152,11 @@ class DownloadManager(object):
 
     def _onDownloadWillBegin(self, **kwargs):
         """用于获取弹出新标签页触发的下载任务"""
+        # print(kwargs)
         guid = kwargs['guid']
-        tab_id = self._browser._frames.get(kwargs['frameId'], self._page.tab_id)
+        tab_id = self._browser._frames.get(kwargs['frameId'], 'browser')
 
-        settings = TabDownloadSettings(tab_id if tab_id in TabDownloadSettings.TABS else self._page.tab_id)
+        settings = TabDownloadSettings(tab_id if tab_id in TabDownloadSettings.TABS else 'browser')
         if settings.rename:
             if settings.suffix is not None:
                 name = f'{settings.rename}.{settings.suffix}' if settings.suffix else settings.rename
@@ -184,7 +188,7 @@ class DownloadManager(object):
             elif settings.when_file_exists == 'overwrite':
                 goal_path.unlink()
 
-        m = DownloadMission(self, tab_id, guid, settings.path, name, kwargs['url'], self._save_path)
+        m = DownloadMission(self, tab_id, guid, settings.path, name, kwargs['url'], self._browser.download_path)
         self._missions[guid] = m
 
         if self.get_flag(tab_id) is False:  # 取消该任务
@@ -214,7 +218,17 @@ class DownloadManager(object):
                 mission.total_bytes = kwargs['totalBytes']
                 form_path = f'{mission.save_path}{sep}{mission.id}'
                 to_path = str(get_usable_path(f'{mission.path}{sep}{mission.name}'))
-                move(form_path, to_path)
+                not_moved = True
+                for _ in range(10):
+                    try:
+                        move(form_path, to_path)
+                        not_moved = False
+                        break
+                    except PermissionError:
+                        sleep(.5)
+                if not_moved:
+                    from shutil import copy
+                    copy(form_path, to_path)
                 self.set_done(mission, 'completed', final_path=to_path)
 
             else:  # 'canceled'

@@ -5,13 +5,13 @@
 @Copyright: (c) 2024 by g1879, Inc. All Rights Reserved.
 @License  : BSD 3-Clause.
 """
-from .._functions.web import set_browser_cookies, set_session_cookies
+from .._functions.cookies import set_tab_cookies, set_session_cookies, set_browser_cookies
 
 
-class CookiesSetter(object):
+class BrowserCookiesSetter(object):
     def __init__(self, owner):
         """
-        :param owner: ChromiumBase对象
+        :param owner: Chromium对象
         """
         self._owner = owner
 
@@ -21,6 +21,24 @@ class CookiesSetter(object):
         :return: None
         """
         set_browser_cookies(self._owner, cookies)
+
+    def clear(self):
+        """清除cookies"""
+        self._owner._run_cdp('Storage.clearCookies')
+
+
+class CookiesSetter(BrowserCookiesSetter):
+
+    def __call__(self, cookies):
+        """设置一个或多个cookie
+        :param cookies: cookies信息
+        :return: None
+        """
+        set_tab_cookies(self._owner, cookies)
+
+    def clear(self):
+        """清除cookies"""
+        self._owner._run_cdp('Network.clearBrowserCookies')
 
     def remove(self, name, url=None, domain=None, path=None):
         """删除一个cookie
@@ -37,13 +55,11 @@ class CookiesSetter(object):
             d['domain'] = domain
         if not url and not domain:
             d['url'] = self._owner.url
+            if not d['url'].startswith('http'):
+                raise ValueError('需设置domain或url值。如设置url值，需以http开头。')
         if path is not None:
             d['path'] = path
-        self._owner.run_cdp('Network.deleteCookies', **d)
-
-    def clear(self):
-        """清除cookies"""
-        self._owner.run_cdp('Network.clearBrowserCookies')
+        self._owner._run_cdp('Network.deleteCookies', **d)
 
 
 class SessionCookiesSetter(object):
@@ -69,7 +85,7 @@ class SessionCookiesSetter(object):
         self._owner.session.cookies.clear()
 
 
-class WebPageCookiesSetter(CookiesSetter, SessionCookiesSetter):
+class MixPageCookiesSetter(CookiesSetter, SessionCookiesSetter):
 
     def __call__(self, cookies):
         """设置多个cookie，注意不要传入单个

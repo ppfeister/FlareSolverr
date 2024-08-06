@@ -18,17 +18,17 @@ from tldextract import extract
 from .._base.base import BasePage
 from .._configs.session_options import SessionOptions
 from .._elements.session_element import SessionElement, make_session_ele
-from .._functions.web import cookie_to_dict, format_headers
+from .._functions.cookies import cookie_to_dict, CookiesList
+from .._functions.web import format_headers
 from .._units.setter import SessionPageSetter
 
 
 class SessionPage(BasePage):
     """SessionPage封装了页面操作的常用功能，使用requests来获取、解析网页"""
 
-    def __init__(self, session_or_options=None, timeout=None):
+    def __init__(self, session_or_options=None):
         """
         :param session_or_options: Session对象或SessionOptions对象
-        :param timeout: 连接超时时间（秒），为None时从ini文件读取或默认10
         """
         super(SessionPage, SessionPage).__init__(self)
         self._headers = None
@@ -38,11 +38,10 @@ class SessionPage(BasePage):
         self._encoding = None
         self._type = 'SessionPage'
         self._page = self
+        self._timeout = 10
         self._s_set_start_options(session_or_options)
         self._s_set_runtime_settings()
         self._create_session()
-        if timeout is not None:
-            self.timeout = timeout
 
     def _s_set_start_options(self, session_or_options):
         """启动配置
@@ -64,8 +63,7 @@ class SessionPage(BasePage):
     def _s_set_runtime_settings(self):
         """设置运行时用到的属性"""
         self._timeout = self._session_options.timeout
-        self._download_path = None if self._session_options.download_path is None \
-            else str(Path(self._session_options.download_path).absolute())
+        self._download_path = str(Path(self._session_options.download_path or '.').absolute())
         self.retry_times = self._session_options.retry_times
         self.retry_interval = self._session_options.retry_interval
 
@@ -146,6 +144,11 @@ class SessionPage(BasePage):
             self._set = SessionPageSetter(self)
         return self._set
 
+    @property
+    def timeout(self):
+        """返回超时设置"""
+        return self._timeout
+
     def get(self, url, show_errmsg=False, retry=None, interval=None, timeout=None, **kwargs):
         """用get方式跳转到url，可输入文件路径
         :param url: 目标url，可指定本地文件路径
@@ -220,9 +223,8 @@ class SessionPage(BasePage):
         """
         return locator if isinstance(locator, SessionElement) else make_session_ele(self, locator, index=index)
 
-    def cookies(self, as_dict=False, all_domains=False, all_info=False):
+    def cookies(self, all_domains=False, all_info=False):
         """返回cookies
-        :param as_dict: 为True时以dict格式返回，为False时返回list且all_info无效
         :param all_domains: 是否返回所有域的cookies
         :param all_info: 是否返回所有信息，False则只返回name、value、domain
         :return: cookies信息
@@ -233,21 +235,20 @@ class SessionPage(BasePage):
             if self.url:
                 ex_url = extract(self._session_url)
                 domain = f'{ex_url.domain}.{ex_url.suffix}' if ex_url.suffix else ex_url.domain
-
-                cookies = tuple(x for x in self.session.cookies if domain in x.domain or x.domain == '')
+                cookies = tuple(c for c in self.session.cookies if domain in c.domain or c.domain == '')
             else:
-                cookies = tuple(x for x in self.session.cookies)
+                cookies = tuple(c for c in self.session.cookies)
 
-        if as_dict:
-            return {x.name: x.value for x in cookies}
-        elif all_info:
-            return [cookie_to_dict(cookie) for cookie in cookies]
+        if all_info:
+            r = CookiesList()
+            for c in cookies:
+                r.append(cookie_to_dict(c))
         else:
-            r = []
+            r = CookiesList()
             for c in cookies:
                 c = cookie_to_dict(c)
                 r.append({'name': c['name'], 'value': c['value'], 'domain': c['domain']})
-            return r
+        return r
 
     def close(self):
         """关闭Session对象"""

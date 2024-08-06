@@ -260,7 +260,7 @@ class SessionElement(DrissionElement):
         :param locator: 元素的定位信息，可以是loc元组，或查询字符串
         :param timeout: 不起实际作用，用于和父类对应
         :param index: 第几个结果，从1开始，可传入负数获取倒数第几个，为None返回所有
-        :param relative: WebPage用的表示是否相对定位的参数
+        :param relative: MixTab用的表示是否相对定位的参数
         :param raise_err: 找不到元素是是否抛出异常，为None时根据全局设置
         :return: SessionElement对象
         """
@@ -276,6 +276,10 @@ class SessionElement(DrissionElement):
 
         while ele:
             if mode == 'css':
+                id_ = ele.attr('id')
+                if id_:
+                    path_str = f'>{ele.tag}#{id_}{path_str}'
+                    break
                 brothers = len(ele.eles(f'xpath:./preceding-sibling::*'))
                 path_str = f'>{ele.tag}:nth-child({brothers + 1}){path_str}'
             else:
@@ -349,11 +353,11 @@ def make_session_ele(html_or_ele, loc=None, index=1, method=None):
         xpath = html_or_ele.xpath
         # ChromiumElement，兼容传入的元素在iframe内的情况
         if html_or_ele._doc_id is None:
-            doc = html_or_ele.run_js('return this.ownerDocument;')
+            doc = html_or_ele._run_js('return this.ownerDocument;')
             html_or_ele._doc_id = doc['objectId'] if doc else False
 
         if html_or_ele._doc_id:
-            html = html_or_ele.owner.run_cdp('DOM.getOuterHTML', objectId=html_or_ele._doc_id)['outerHTML']
+            html = html_or_ele.owner._run_cdp('DOM.getOuterHTML', objectId=html_or_ele._doc_id)['outerHTML']
         else:
             html = html_or_ele.owner.html
         html_or_ele = fromstring(html)

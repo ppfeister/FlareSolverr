@@ -21,7 +21,8 @@ class ChromiumOptions(object):
         self._user = 'Default'
         self._prefs_to_del = []
         self.clear_file_flags = False
-        self._headless = None
+        self._is_headless = False
+        self._ua_set = False
 
         if read_file is False:
             ini_path = False
@@ -33,10 +34,10 @@ class ChromiumOptions(object):
             self.ini_path = str(ini_path)
         else:
             self.ini_path = str(Path(__file__).parent / 'configs.ini')
-        om = OptionsManager(ini_path)
 
+        om = OptionsManager(ini_path)
         options = om.chromium_options
-        self._download_path = om.paths.get('download_path', None) or None
+        self._download_path = om.paths.get('download_path', '.') or '.'
         self._tmp_path = om.paths.get('tmp_path', None) or None
         self._arguments = options.get('arguments', [])
         self._browser_path = options.get('browser_path', '')
@@ -47,6 +48,11 @@ class ChromiumOptions(object):
         self._load_mode = options.get('load_mode', 'normal')
         self._system_user_path = options.get('system_user_path', False)
         self._existing_only = options.get('existing_only', False)
+        self._new_env = options.get('new_env', False)
+        for i in self._arguments:
+            if i.startswith('--headless'):
+                self._is_headless = True
+                break
 
         self._proxy = om.proxies.get('http', None) or om.proxies.get('https', None)
 
@@ -164,6 +170,11 @@ class ChromiumOptions(object):
         """返回连接失败时的重试间隔（秒）"""
         return self._retry_interval
 
+    @property
+    def is_headless(self):
+        """返回是否无头模式"""
+        return self._is_headless
+
     def set_retry(self, times=None, interval=None):
         """设置连接失败时的重试操作
         :param times: 重试次数
@@ -184,11 +195,19 @@ class ChromiumOptions(object):
         """
         self.remove_argument(arg)
         if value is not False:
-            if arg == '--headless' and value is None:
-                self._arguments.append('--headless=new')
+            if arg == '--headless':
+                if value == 'false':
+                    self._is_headless = False
+                else:
+                    if value is None:
+                        value = 'new'
+                    self._arguments.append(f'--headless={value}')
+                    self._is_headless = True
             else:
                 arg_str = arg if value is None else f'{arg}={value}'
                 self._arguments.append(arg_str)
+        elif arg == '--headless':
+            self._is_headless = False
         return self
 
     def remove_argument(self, value):
@@ -196,20 +215,15 @@ class ChromiumOptions(object):
         :param value: 设置项名，有值的设置项传入设置名称即可
         :return: 当前对象
         """
-        elements_to_delete = tuple(
-            arg for arg in self._arguments 
-            if arg == value or arg.startswith(f'{value}=')
-        )
-        if len(elements_to_delete) == 0:
+        elements_to_delete = [arg for arg in self._arguments if arg == value or arg.startswith(f'{value}=')]
+        if not elements_to_delete:
             return self
 
         if len(elements_to_delete) == 1:
             self._arguments.remove(elements_to_delete[0])
         else:
-            self._arguments = [
-                arg for arg in self._arguments 
-                if arg not in elements_to_delete
-            ]
+            self._arguments = [arg for arg in self._arguments if arg not in elements_to_delete]
+
         return self
 
     def add_extension(self, path):
@@ -287,14 +301,13 @@ class ChromiumOptions(object):
         self._prefs = {}
         return self
 
-    def set_timeouts(self, base=None, page_load=None, script=None, implicit=None):
+    def set_timeouts(self, base=None, page_load=None, script=None):
         """设置超时时间，单位为秒
         :param base: 默认超时时间
         :param page_load: 页面加载超时时间
         :param script: 脚本运行超时时间
         :return: 当前对象
         """
-        base = base if base is not None else implicit
         if base is not None:
             self._timeouts['base'] = base
         if page_load is not None:
@@ -318,7 +331,7 @@ class ChromiumOptions(object):
         :param on_off: 开或关
         :return: 当前对象
         """
-        on_off = 'new' if on_off else 'false'
+        on_off = 'new' if on_off else on_off
         return self.set_argument('--headless', on_off)
 
     def no_imgs(self, on_off=True):
@@ -352,6 +365,14 @@ class ChromiumOptions(object):
         """
         on_off = None if on_off else False
         return self.set_argument('--incognito', on_off)
+
+    def new_env(self, on_off=True):
+        """设置是否使用全新浏览器环境
+        :param on_off: 开或关
+        :return: 当前对象
+        """
+        self._new_env = on_off
+        return self
 
     def ignore_certificate_errors(self, on_off=True):
         """设置是否忽略证书错误
@@ -455,7 +476,7 @@ class ChromiumOptions(object):
         :param path: 下载路径
         :return: 当前对象
         """
-        self._download_path = str(path)
+        self._download_path = '.' if path is None else str(path)
         return self
 
     def set_tmp_path(self, path):
@@ -493,17 +514,14 @@ class ChromiumOptions(object):
         self._system_user_path = on_off
         return self
 
-    def auto_port(self, on_off=True, tmp_path=None, scope=None):
+    def auto_port(self, on_off=True, scope=None):
         """自动获取可用端口
         :param on_off: 是否开启自动获取端口号
-        :param tmp_path: 临时文件保存路径，为None时保存到系统临时文件夹，on_off为False时此参数无效
-        :param scope: 指定端口范围，不含最后的数字，为None则使用[9600-19600)
+        :param scope: 指定端口范围，不含最后的数字，为None则使用[9600-59600)
         :return: 当前对象
         """
         if on_off:
-            self._auto_port = scope if scope else True
-            if tmp_path:
-                self._tmp_path = str(tmp_path)
+            self._auto_port = scope if scope else (9600, 59600)
         else:
             self._auto_port = False
         return self
@@ -542,7 +560,7 @@ class ChromiumOptions(object):
 
         # 设置chromium_options
         attrs = ('address', 'browser_path', 'arguments', 'extensions', 'user', 'load_mode',
-                 'auto_port', 'system_user_path', 'existing_only', 'flags')
+                 'auto_port', 'system_user_path', 'existing_only', 'flags', 'new_env')
         for i in attrs:
             om.set_item('chromium_options', i, self.__getattribute__(f'_{i}'))
         # 设置代理

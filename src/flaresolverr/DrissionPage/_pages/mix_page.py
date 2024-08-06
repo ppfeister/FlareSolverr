@@ -6,15 +6,14 @@
 @License  : BSD 3-Clause.
 """
 from .chromium_page import ChromiumPage
-from .chromium_tab import WebPageTab
 from .session_page import SessionPage
 from .._base.base import BasePage
 from .._configs.chromium_options import ChromiumOptions
-from .._functions.web import set_session_cookies, set_browser_cookies
-from .._units.setter import WebPageSetter
+from .._functions.cookies import set_session_cookies, set_tab_cookies
+from .._units.setter import MixPageSetter
 
 
-class WebPage(SessionPage, ChromiumPage, BasePage):
+class MixPage(SessionPage, ChromiumPage, BasePage):
     """整合浏览器和request的页面类"""
 
     def __new__(cls, mode='d', timeout=None, chromium_options=None, session_or_options=None):
@@ -26,7 +25,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         """
         return super().__new__(cls, chromium_options)
 
-    def __init__(self, mode='d', timeout=None, chromium_options=None, session_or_options=None, driver_or_options=None):
+    def __init__(self, mode='d', timeout=None, chromium_options=None, session_or_options=None):
         """初始化函数
         :param mode: 'd' 或 's'，即driver模式和session模式
         :param timeout: 超时时间（秒），d模式时为寻找元素时间，s模式时为连接时间，默认10秒
@@ -47,7 +46,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
             chromium_options = ChromiumOptions(read_file=chromium_options)
             chromium_options.set_timeouts(base=self._timeout).set_paths(download_path=self.download_path)
         super(SessionPage, self).__init__(addr_or_opts=chromium_options, timeout=timeout)
-        self._type = 'WebPage'
+        self._type = 'MixPage'
         self.change_mode(self._mode, go=False, copy_cookies=False)
 
     def __call__(self, locator, index=1, timeout=None):
@@ -67,7 +66,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
     def set(self):
         """返回用于设置的对象"""
         if self._set is None:
-            self._set = WebPageSetter(self)
+            self._set = MixPageSetter(self)
         return self._set
 
     @property
@@ -148,15 +147,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
     @property
     def timeout(self):
         """返回通用timeout设置"""
-        return self.timeouts.base
-
-    @timeout.setter
-    def timeout(self, second):
-        """设置通用超时时间
-        :param second: 秒数
-        :return: None
-        """
-        self.set.timeouts(base=second)
+        return self._timeout if self._mode == 's' else self.timeouts.base
 
     def get(self, url, show_errmsg=False, retry=None, interval=None, timeout=None, **kwargs):
         """跳转到一个url
@@ -284,7 +275,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
             return
 
         if copy_user_agent:
-            user_agent = self.run_cdp('Runtime.evaluate', expression='navigator.userAgent;')['result']['value']
+            user_agent = self._run_cdp('Runtime.evaluate', expression='navigator.userAgent;')['result']['value']
             self._headers.update({"User-Agent": user_agent})
 
         set_session_cookies(self.session, super(SessionPage, self).cookies())
@@ -293,19 +284,18 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         """把session对象的cookies复制到浏览器"""
         if not self._has_driver:
             return
-        set_browser_cookies(self, super().cookies())
+        set_tab_cookies(self, super().cookies())
 
-    def cookies(self, as_dict=False, all_domains=False, all_info=False):
+    def cookies(self, all_domains=False, all_info=False):
         """返回cookies
-        :param as_dict: 为True时以dict格式返回，为False时返回list且all_info无效
         :param all_domains: 是否返回所有域的cookies
         :param all_info: 是否返回所有信息，False则只返回name、value、domain
         :return: cookies信息
         """
         if self._mode == 's':
-            return super().cookies(as_dict, all_domains, all_info)
+            return super().cookies(all_domains, all_info)
         elif self._mode == 'd':
-            return super(SessionPage, self).cookies(as_dict, all_domains, all_info)
+            return super(SessionPage, self).cookies(all_domains, all_info)
 
     def get_tab(self, id_or_num=None, title=None, url=None, tab_type='page', as_id=False):
         """获取一个标签页对象，id_or_num不为None时，后面几个参数无效
@@ -314,31 +304,10 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         :param url: 要匹配url的文本，模糊匹配，为None则匹配所有
         :param tab_type: tab类型，可用列表输入多个，如 'page', 'iframe' 等，为None则匹配所有
         :param as_id: 是否返回标签页id而不是标签页对象
-        :return: WebPageTab对象
+        :return: MixTab对象
         """
-        if id_or_num is not None:
-            if isinstance(id_or_num, str):
-                id_or_num = id_or_num
-            elif isinstance(id_or_num, int):
-                id_or_num = self.tab_ids[id_or_num - 1 if id_or_num > 0 else id_or_num]
-            elif isinstance(id_or_num, WebPageTab):
-                return id_or_num.tab_id if as_id else id_or_num
-
-        elif title == url == tab_type is None:
-            id_or_num = self.tab_id
-
-        else:
-            id_or_num = self._browser.find_tabs(title, url, tab_type)
-            if id_or_num:
-                id_or_num = id_or_num[0]['id']
-            else:
-                return None
-
-        if as_id:
-            return id_or_num
-
-        with self._lock:
-            return WebPageTab(self, id_or_num)
+        return self.browser._get_tab(id_or_num=id_or_num, title=title, url=url,
+                                     tab_type=tab_type, mix=True, as_id=as_id)
 
     def get_tabs(self, title=None, url=None, tab_type='page', as_id=False):
         """查找符合条件的tab，返回它们组成的列表
@@ -348,10 +317,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         :param as_id: 是否返回标签页id而不是标签页对象
         :return: ChromiumTab对象组成的列表
         """
-        if as_id:
-            return [tab['id'] for tab in self._browser.find_tabs(title, url, tab_type)]
-        with self._lock:
-            return [WebPageTab(self, tab['id']) for tab in self._browser.find_tabs(title, url, tab_type)]
+        return self.browser._get_tabs(title=title, url=url, tab_type=tab_type, mix=True, as_id=as_id)
 
     def new_tab(self, url=None, new_window=False, background=False, new_context=False):
         """新建一个标签页
@@ -361,10 +327,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         :param new_context: 是否创建新的上下文
         :return: 新标签页对象
         """
-        tab = WebPageTab(self, tab_id=self.browser.new_tab(new_window, background, new_context))
-        if url:
-            tab.get(url)
-        return tab
+        return self.browser.new_mix_tab(url=url, new_window=new_window, background=background, new_context=new_context)
 
     def close_driver(self):
         """关闭driver及浏览器"""
@@ -403,7 +366,7 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         :param locator: 元素的定位信息，可以是元素对象，loc元组，或查询字符串
         :param timeout: 查找元素超时时间（秒），d模式专用
         :param index: 第几个结果，从1开始，可传入负数获取倒数第几个，为None返回所有
-        :param relative: WebPage用的表示是否相对定位的参数
+        :param relative: MixTab用的表示是否相对定位的参数
         :param raise_err: 找不到元素是是否抛出异常，为None时根据全局设置
         :return: 元素对象或属性、文本节点文本
         """
@@ -412,10 +375,11 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
         elif self._mode == 'd':
             return super(SessionPage, self)._find_elements(locator, timeout=timeout, index=index, relative=relative)
 
-    def quit(self, timeout=5, force=True):
+    def quit(self, timeout=5, force=True, del_data=False):
         """关闭浏览器和Session
         :param timeout: 等待浏览器关闭超时时间（秒）
         :param force: 关闭超时是否强制终止进程
+        :param del_data: 是否删除用户文件夹
         :return: None
         """
         if self._has_session:
@@ -424,9 +388,9 @@ class WebPage(SessionPage, ChromiumPage, BasePage):
             self._response = None
             self._has_session = None
         if self._has_driver:
-            super(SessionPage, self).quit(timeout, force)
+            super(SessionPage, self).quit(timeout, force, del_data=del_data)
             self._driver = None
             self._has_driver = None
 
     def __repr__(self):
-        return f'<WebPage browser_id={self.browser.id} tab_id={self.tab_id}>'
+        return f'<MixPage browser_id={self.browser.id} tab_id={self.tab_id}>'

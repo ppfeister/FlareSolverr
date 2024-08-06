@@ -8,18 +8,27 @@
 from http.cookiejar import Cookie, CookieJar
 from typing import Union
 
+from .._base.browser import Chromium
 from .._pages.chromium_base import ChromiumBase
-from .._pages.chromium_tab import WebPageTab
+from .._pages.tabs import MixTab
 from .._pages.session_page import SessionPage
-from .._pages.web_page import WebPage
+from .._pages.mix_page import MixPage
 
 
-class CookiesSetter(object):
-    _owner: ChromiumBase
+class BrowserCookiesSetter(object):
+    _owner: Chromium = ...
 
-    def __init__(self, page: ChromiumBase): ...
+    def __init__(self, page: Chromium): ...
 
     def __call__(self, cookies: Union[CookieJar, Cookie, list, tuple, str, dict]) -> None: ...
+
+    def clear(self) -> None: ...
+
+
+class CookiesSetter(BrowserCookiesSetter):
+    _owner: ChromiumBase = ...
+
+    def __init__(self, page: ChromiumBase): ...
 
     def remove(self, name: str, url: str = None, domain: str = None, path: str = None) -> None: ...
 
@@ -27,7 +36,7 @@ class CookiesSetter(object):
 
 
 class SessionCookiesSetter(object):
-    _owner: SessionPage
+    _owner: SessionPage = ...
 
     def __init__(self, page: SessionPage): ...
 
@@ -38,8 +47,8 @@ class SessionCookiesSetter(object):
     def clear(self) -> None: ...
 
 
-class WebPageCookiesSetter(CookiesSetter, SessionCookiesSetter):
-    _owner: Union[WebPage, WebPageTab]
+class MixPageCookiesSetter(CookiesSetter, SessionCookiesSetter):
+    _owner: Union[MixPage, MixTab] = ...
 
     def __init__(self, page: SessionPage): ...
 

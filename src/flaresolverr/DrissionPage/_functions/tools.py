@@ -8,7 +8,7 @@
 from pathlib import Path
 from platform import system
 from shutil import rmtree
-from tempfile import gettempdir, TemporaryDirectory
+from tempfile import gettempdir
 from threading import Lock
 from time import perf_counter, sleep
 
@@ -18,44 +18,52 @@ from ..errors import (ContextLostError, ElementLostError, CDPError, PageDisconne
 
 
 class PortFinder(object):
-    used_port = {}
+    used_port = set()
+    prev_time = 0
     lock = Lock()
+    checked_paths = set()
 
     def __init__(self, path=None):
         """
         :param path: 临时文件保存路径，为None时使用系统临时文件夹
         """
         tmp = Path(path) if path else Path(gettempdir()) / 'DrissionPage'
-        self.tmp_dir = tmp / 'UserTempFolder'
+        self.tmp_dir = tmp / 'autoPortData'
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        if not PortFinder.used_port:
-            clean_folder(self.tmp_dir)
+        if str(self.tmp_dir.absolute()) not in PortFinder.checked_paths:
+            for i in self.tmp_dir.iterdir():
+                if i.is_dir() and not port_is_using('127.0.0.1', i.name):
+                    rmtree(i, ignore_errors=True)
+            PortFinder.checked_paths.add(str(self.tmp_dir.absolute()))
 
     def get_port(self, scope=None):
         """查找一个可用端口
-        :param scope: 指定端口范围，不含最后的数字，为None则使用[9600-19600)
+        :param scope: 指定端口范围，不含最后的数字，为None则使用[9600-59600)
         :return: 可以使用的端口和用户文件夹路径组成的元组
         """
+        from random import randint
         with PortFinder.lock:
+            if PortFinder.prev_time and perf_counter() - PortFinder.prev_time > 60:
+                PortFinder.used_port.clear()
             if scope in (True, None):
-                scope = (9600, 19600)
-            for i in range(scope[0], scope[1]):
-                if i in PortFinder.used_port:
+                scope = (9600, 59600)
+            max_times = scope[1] - scope[0]
+            times = 0
+            while times < max_times:
+                times += 1
+                port = randint(*scope)
+                if port in PortFinder.used_port or port_is_using('127.0.0.1', port):
                     continue
-                elif port_is_using('127.0.0.1', i):
-                    PortFinder.used_port[i] = None
-                    continue
-                path = TemporaryDirectory(dir=self.tmp_dir).name
-                PortFinder.used_port[i] = path
-                return i, path
-
-            for i in range(scope[0], scope[1]):
-                if port_is_using('127.0.0.1', i):
-                    continue
-                rmtree(PortFinder.used_port[i], ignore_errors=True)
-                return i, TemporaryDirectory(dir=self.tmp_dir).name
-
-        raise OSError('未找到可用端口。')
+                path = self.tmp_dir / str(port)
+                if path.exists():
+                    try:
+                        rmtree(path)
+                    except:
+                        continue
+                PortFinder.used_port.add(port)
+                PortFinder.prev_time = perf_counter()
+                return port, str(path)
+            raise OSError('未找到可用端口。')
 
 
 def port_is_using(ip, port):
@@ -95,7 +103,7 @@ def show_or_hide_browser(page, hide=True):
     :param hide: 是否隐藏
     :return: None
     """
-    if not page.address.startswith(('127.0.0.1', 'localhost')):
+    if not page.browser.address.startswith(('127.0.0.1', 'localhost')):
         return
 
     if system().lower() != 'windows':
@@ -191,10 +199,11 @@ def configs_to_here(save_name=None):
     om.save(save_name)
 
 
-def raise_error(result, ignore=None):
+def raise_error(result, ignore=None, user=False):
     """抛出error对应报错
     :param result: 包含error的dict
     :param ignore: 要忽略的错误
+    :param user: 是否用户调用的
     :return: None
     """
     error = result['error']
@@ -217,16 +226,23 @@ def raise_error(result, ignore=None):
         r = StorageError()
     elif error == 'Sanitizing cookie failed':
         r = CookieFormatError(f'cookie格式不正确：{result["args"]}')
+    elif error == 'Invalid header name':
+        r = ValueError(f'header名不正确。\n参数：{result["args"]["headers"]}')
     elif error == 'Given expression does not evaluate to a function':
         r = JavaScriptError(f'传入的js无法解析成函数：\n{result["args"]["functionDeclaration"]}')
     elif error.endswith("' wasn't found"):
-        r = RuntimeError(f'你的浏览器可能太旧。\n方法：{result["method"]}\n参数：{result["args"]}')
-    elif result['type'] in ('call_method_error', 'timeout'):
-        from DrissionPage import __version__
+        r = RuntimeError(f'没有找到对应功能，方法错误或你的浏览器太旧。\n方法：{result["method"]}\n参数：{result["args"]}')
+    elif result['type'] == 'timeout':
+        from ...DrissionPage import __version__
+        txt = f'\n错误：{result["error"]}\n方法：{result["method"]}\n参数：{result["args"]}\n' \
+              f'版本：{__version__}\n超时，可能是浏览器卡了。'
+        r = TimeoutError(txt)
+    elif result['type'] == 'call_method_error' and not user:
+        from ...DrissionPage import __version__
         txt = f'\n错误：{result["error"]}\n方法：{result["method"]}\n参数：{result["args"]}\n' \
               f'版本：{__version__}\n出现这个错误可能意味着程序有bug，请把错误信息和重现方法' \
               '告知作者，谢谢。\n报告网站：https://gitee.com/g1879/DrissionPage/issues'
-        r = TimeoutError(txt) if result['type'] == 'timeout' else CDPError(txt)
+        r = CDPError(txt)
     else:
         r = RuntimeError(result)
 

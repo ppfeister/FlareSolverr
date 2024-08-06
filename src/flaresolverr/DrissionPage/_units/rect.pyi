@@ -12,8 +12,8 @@ from .._elements.chromium_element import ChromiumElement
 from .._pages.chromium_base import ChromiumBase
 from .._pages.chromium_frame import ChromiumFrame
 from .._pages.chromium_page import ChromiumPage
-from .._pages.chromium_tab import ChromiumTab, WebPageTab
-from .._pages.web_page import WebPage
+from .._pages.tabs import ChromiumTab, MixTab
+from .._pages.mix_page import MixPage
 
 
 class ElementRect(object):
@@ -56,6 +56,9 @@ class ElementRect(object):
     @property
     def viewport_corners(self) -> Tuple[Tuple[float, float], ...]: ...
 
+    @property
+    def scroll_position(self) -> Tuple[float, float]: ...
+
     def _get_viewport_rect(self, quad: str) -> Union[list, None]: ...
 
     def _get_page_coord(self, x: float, y: float) -> Tuple[float, float]: ...
@@ -63,7 +66,7 @@ class ElementRect(object):
 
 class TabRect(object):
     def __init__(self, owner: ChromiumBase):
-        self._owner: Union[ChromiumPage, ChromiumTab, WebPage, WebPageTab] = ...
+        self._owner: Union[ChromiumPage, ChromiumTab, MixPage, MixTab] = ...
 
     @property
     def window_state(self) -> str: ...
@@ -88,6 +91,9 @@ class TabRect(object):
 
     @property
     def viewport_size_with_scrollbar(self) -> Tuple[int, int]: ...
+
+    @property
+    def scroll_position(self) -> Tuple[int, int]: ...
 
     def _get_page_rect(self) -> dict: ...
 
@@ -118,3 +124,6 @@ class FrameRect(object):
 
     @property
     def viewport_corners(self) -> Tuple[Tuple[float, float], ...]: ...
+
+    @property
+    def scroll_position(self) -> Tuple[float, float]: ...

@@ -6,13 +6,13 @@
 @License  : BSD 3-Clause.
 """
 from queue import Queue
-from threading import Thread, Event
+from threading import Thread
 from typing import Union, Callable, Dict, Optional
 
-from requests import Response, Session
+from requests import Response
 from websocket import WebSocket
 
-from .browser import Browser
+from .browser import Chromium
 
 
 class GenericAttr(object):
@@ -35,7 +35,8 @@ class Driver(object):
     _recv_th: Thread
     _handle_event_th: Thread
     _handle_immediate_event_th: Optional[Thread]
-    _stopped: Event
+    # _stopped: Event
+    is_running: bool
     event_handlers: dict
     immediate_event_handlers: dict
     method_results: dict
@@ -67,11 +68,10 @@ class Driver(object):
 
 class BrowserDriver(Driver):
     BROWSERS: Dict[str, Driver] = ...
-    owner: Browser = ...
-    _control_session: Session = ...
+    owner: Chromium = ...
 
-    def __new__(cls, tab_id: str, tab_type: str, address: str, owner: Browser): ...
+    def __new__(cls, tab_id: str, tab_type: str, address: str, owner: Chromium): ...
 
-    def __init__(self, tab_id: str, tab_type: str, address: str, owner: Browser): ...
+    def __init__(self, tab_id: str, tab_type: str, address: str, owner: Chromium): ...
 
     def get(self, url) -> Response: ...
