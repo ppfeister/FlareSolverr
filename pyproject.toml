@@ -13,9 +13,9 @@ dependencies = [
     "waitress==2.1.2",
     "func-timeout==4.3.5",
     "prometheus-client==0.17.1",
-    "requests==2.32.0",
-    "certifi==2024.07.04",
-    "websockets==11.0.3",
+    "requests==2.32.0",    # required by undetected_chromedriver, DrissionPage
+    "certifi==2024.07.04", # required by undetected_chromedriver
+    "websockets==11.0.3",  # required by undetected_chromedriver
     "xvfbwrapper==0.2.9; platform_system != \"Windows\"",
     "pefile==2023.2.7; platform_system == \"Windows\"",
     "lxml",                # required by DrissionPage
