@@ -8,14 +8,14 @@ from urllib.parse import unquote, quote
 
 from func_timeout import FunctionTimedOut, func_timeout
 
-from flaresolverr.DrissionPage import ChromiumPage
-from flaresolverr.DrissionPage._units.listener import DataPacket
+from ..flaresolverr.DrissionPage import ChromiumPage
+from ..flaresolverr.DrissionPage._units.listener import DataPacket
 
-from flaresolverr import utils
-from flaresolverr.dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
+from ..flaresolverr import utils
+from ..flaresolverr.dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
                   ChallengeResolutionT, HealthResponse, IndexResponse,
                   V1RequestBase, V1ResponseBase)
-from flaresolverr.sessions import SessionsStorage
+from ..flaresolverr.sessions import SessionsStorage
 
 ACCESS_DENIED_TITLES = [
     # Cloudflare

@@ -1,3 +1,1 @@
-from importlib.metadata import version
-
-__version__ = version("flaresolverr")
+__version__ = "Sylva Custom 4.1.0.0b19"

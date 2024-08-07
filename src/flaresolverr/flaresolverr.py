@@ -6,12 +6,12 @@ import sys
 import certifi
 from bottle import run as bottle_run, response, Bottle, request, ServerAdapter
 
-from flaresolverr.bottle_plugins.error_plugin import error_plugin
-from flaresolverr.bottle_plugins.logger_plugin import logger_plugin
-from flaresolverr.bottle_plugins import prometheus_plugin
-from flaresolverr.dtos import V1RequestBase
-from flaresolverr import flaresolverr_service
-from flaresolverr import utils
+from ..flaresolverr.bottle_plugins.error_plugin import error_plugin
+from ..flaresolverr.bottle_plugins.logger_plugin import logger_plugin
+from ..flaresolverr.bottle_plugins import prometheus_plugin
+from ..flaresolverr.dtos import V1RequestBase
+from ..flaresolverr import flaresolverr_service
+from ..flaresolverr import utils
 
 
 class JSONErrorBottle(Bottle):
@@ -60,7 +60,7 @@ def controller_v1():
 def run(
         server_host: str = os.environ.get('HOST', '0.0.0.0'),
         server_port: int = int(os.environ.get('PORT', 8191)),
-        
+
 ):
     # check python version
     if sys.version_info < (3, 9):

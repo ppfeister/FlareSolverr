@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from uuid import uuid1
 
-from flaresolverr.DrissionPage import ChromiumPage
+from ..flaresolverr.DrissionPage import ChromiumPage
 
-from flaresolverr import utils
+from ..flaresolverr import utils
 
 
 @dataclass
@@ -34,7 +34,7 @@ class SessionsStorage:
 
         Note: The function is idempotent, so in case if session_id
         already exists in the storage a new instance of ChromiumPage won't be created
-        and existing session will be returned. Second argument defines if 
+        and existing session will be returned. Second argument defines if
         new session has been created (True) or an existing one was used (False).
         """
         session_id = session_id or str(uuid1())

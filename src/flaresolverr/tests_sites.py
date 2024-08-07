@@ -2,9 +2,9 @@ import unittest
 
 from webtest import TestApp
 
-from flaresolverr.dtos import V1ResponseBase, STATUS_OK
-from flaresolverr import flaresolverr
-from flaresolverr import utils
+from ..flaresolverr.dtos import V1ResponseBase, STATUS_OK
+from ..flaresolverr import flaresolverr
+from ..flaresolverr import utils
 
 
 def _find_obj_by_key(key: str, value: str, _list: list) -> dict | None:

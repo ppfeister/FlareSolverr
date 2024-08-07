@@ -11,7 +11,7 @@ from uuid import uuid1
 from pathlib import Path
 from tempfile import gettempdir
 
-from flaresolverr.DrissionPage import ChromiumPage, ChromiumOptions
+from sylva.helpers.flaresolverr.DrissionPage import ChromiumPage, ChromiumOptions
 # from DrissionPage.common import Settings
 
 FLARESOLVERR_VERSION = None
@@ -184,10 +184,10 @@ def remove_user_data(user_data_path: Path):
 def remove_all_subfolders(parent_folder: str):
     if not os.path.exists(parent_folder):
         return
-    
+
     for item in os.listdir(parent_folder):
         item_path = os.path.join(parent_folder, item)
-        
+
         if os.path.isdir(item_path):
             shutil.rmtree(item_path)
 
